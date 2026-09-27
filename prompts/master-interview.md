@@ -145,3 +145,107 @@ Return exactly these seven top-level keys. Include concise structured values sup
   "growth_goals": {}
 }
 ```
+
+## Workflow Architecture & Decision Graph
+
+The diagram follows the interview from language selection through the ordered seven-category question bank to the final JSON profile. Solid arrows show normal progress; dashed arrows show clarification, retry, and exception paths that keep the current questions pending.
+
+```mermaid
+flowchart TD
+    classDef setup fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px
+    classDef active fill:#eef2ff,stroke:#6366f1,color:#312e81,stroke-width:1.5px
+    classDef decision fill:#fff7ed,stroke:#f97316,color:#7c2d12,stroke-width:1.5px
+    classDef exception fill:#fef2f2,stroke:#ef4444,color:#7f1d1d,stroke-width:1.5px,stroke-dasharray:5 4
+    classDef complete fill:#ecfdf5,stroke:#10b981,color:#064e3b,stroke-width:1.5px
+    classDef output fill:#f5f3ff,stroke:#8b5cf6,color:#4c1d95,stroke-width:2px
+
+    subgraph Setup["Setup"]
+        S([Start]):::setup
+        L{Target language selected?}:::decision
+        LP[Ask language preference<br/>English or Arabic MSA]:::setup
+        LR[Clarify supported language choice<br/>Keep setup pending]:::exception
+        I[State 0 — Initialize<br/>Set language and interview record]:::setup
+    end
+
+    subgraph Interview["Interview State Machine"]
+        Q[State 1 — Ask and wait<br/>Present the next ordered pair]:::active
+        P[State 2 — Process answers<br/>Map answers and save concise summaries]:::active
+        D{Pair complete or explicitly<br/>unknown, not applicable, or declined?}:::decision
+        M[Missing answer retry<br/>Ask for the pending item]:::exception
+        U[Unclear answer clarification<br/>Keep current pair pending]:::exception
+        O[Off-topic redirect<br/>Acknowledge briefly and restate the same pair]:::exception
+        C{Meaningful conflict with<br/>collected facts or supplied profile?}:::decision
+        X[Clarification state<br/>Ask a neutral conflict question]:::exception
+        XR{Clarification resolved<br/>or uncertainty stated?}:::decision
+        A[Record clarification and resume<br/>the pending pair]:::active
+        K{Category complete?}:::decision
+        CS[State 3 — Category summary<br/>Exactly two sentences]:::complete
+        N{All seven categories and<br/>50 question IDs resolved?}:::decision
+        ADV[Advance category pointer]:::active
+        F[State 4 — Finalize<br/>Stop interview and form profile]:::complete
+        J[(Single raw profile.json<br/>Seven required top-level keys)]:::output
+    end
+
+    subgraph Categories["Ordered Question Bank — 50 IDs Across Seven Categories"]
+        C1[1. Identity and work]:::active
+        C2[2. Communication style]:::active
+        C3[3. Knowledge and skills]:::active
+        C4[4. Tools and workflow]:::active
+        C5[5. Decision-making]:::active
+        C6[6. Goals and priorities]:::active
+        C7[7. Personal context]:::active
+    end
+
+    S --> L
+    L -- "Yes" --> I
+    L -- "No" --> LP
+    LP -. "Unclear selection" .-> LR
+    LR -. "Selection clarified" .-> LP
+    LP -- "English or Arabic MSA" --> I
+    I --> C1
+    C1 --> Q
+    C2 --> Q
+    C3 --> Q
+    C4 --> Q
+    C5 --> Q
+    C6 --> Q
+    C7 --> Q
+
+    Q -- "User response" --> P
+    Q -. "Topic change" .-> O
+    O -. "Same pair remains pending" .-> Q
+    Q -. "Unclear response" .-> U
+    U -. "Clarified response" .-> P
+    Q -. "No response / drop-off" .-> Q
+    P --> D
+    D -- "Incomplete" --> M
+    M -. "Missing item supplied" .-> P
+    D -- "Complete or disposition recorded" --> C
+    C -- "Yes" --> X
+    X --> XR
+    XR -- "Resolved or user is unsure" --> A
+    A --> D
+    XR -. "Awaiting user clarification" .-> X
+    C -- "No" --> K
+    K -- "No" --> Q
+    K -- "Yes" --> CS
+    CS --> N
+    N -- "Yes" --> F
+    N -- "No — advance in category order" --> ADV
+    ADV -- "After category 1" --> C2
+    ADV -- "After category 2" --> C3
+    ADV -- "After category 3" --> C4
+    ADV -- "After category 4" --> C5
+    ADV -- "After category 5" --> C6
+    ADV -- "After category 6" --> C7
+    F --> J
+
+    class S,L,LP,LR,I setup
+    class Q,P,A,ADV,C1,C2,C3,C4,C5,C6,C7 active
+    class D,C,K,N,XR decision
+    class M,U,O,X exception
+    class CS,F complete
+    class J output
+```
+
+**Edge-case notes:** A supplied profile is optional; when present, its facts participate in contradiction checks, and when absent the interview proceeds using answers collected in the current session. The prompt defines no timeout, persistence, or resume procedure for user drop-offs, so the graph keeps the interview at the pending pair without implying recovery behavior. The question matrices currently contain topic outlines rather than stable numbered IDs, so the 50-ID sequence shown here is the intended prompt contract and still depends on a canonical bank.
