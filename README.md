@@ -24,7 +24,7 @@ Whenever you start a new project, your AI already knows what you know—and exac
 * ⚡ **Single-File Context (`profile.md`):** Your entire persona is compiled into one dense file. This prevents the LLM "lost in the middle" effect and ensures lightning-fast retrieval.
 * 🌍 **Trilingual Support:** Native prompt templates in English, Modern Standard Arabic (MSA), and Egyptian Arabic.
 * ⏱️ **60-Minute Onboarding:** Bring a new project idea to your "Dialed-In" AI, and it will perform a gap analysis, telling you exactly what to leverage and what new skills to learn in your first hour.
-* 🔌 **MCP Ready (Coming Soon):** Designed to integrate with local Model Context Protocol (MCP) servers, feeding your profile directly into IDEs like Cursor and Claude Desktop automatically.
+* 🔌 **Local MCP Server:** Run a read-only stdio server that supplies your local profile to existing MCP hosts such as Cursor, Claude Desktop, and Windsurf. The server exposes no network transport and makes no network calls.
 
 ---
 
@@ -33,15 +33,19 @@ Whenever you start a new project, your AI already knows what you know—and exac
 1. **The Interview:** You copy our `master-interview` prompt into your favorite LLM (ChatGPT, Claude, Gemini).
 2. **The Chat:** The AI acts as a Technical Profiler, asking you targeted questions about your current skills, goals, and limitations.
 3. **The Output:** Once completed, the AI generates your personal `profile.md`.
-4. **The Execution:** Use your `profile.md` alongside our `project-onboarding` prompt whenever you start something new. Get instant, tailored guidance.
+4. **The Execution:** Use your `profile.md` alongside the `prompts/project_onboarding.md` prompt whenever you start something new. Get instant, tailored guidance.
 
 ---
 
 ### Phase 7: Workflow Documentation & System Utility
 
-Phase 7 documents how the MySpec components operate as one connected system and how users can maximize the value of their profile. It covers the progression from the 50-question interview to profile generation, project onboarding, and evidence-based profile updates, with the MCP Server coordinating context through AI skills.
+Phase 7 documents how the MySpec components operate as one connected system and how users can maximize the value of their profile. It covers the progression from the interview to profile generation, project onboarding, and evidence-based profile updates.
 
 See the complete guide in [`docs/how-it-works.md`](docs/how-it-works.md) and the implementation record in [`docs/phases/phase-07-how-it-works.md`](docs/phases/phase-07-how-it-works.md).
+
+### Phase 8: Local MCP Server
+
+Phase 8 adds a local-only stdio MCP server for reading the MySpec profile and supplying context to an existing AI host. See [`mcp-server/README.md`](mcp-server/README.md) for installation and host configuration, and [`docs/phases/phase-08-local-mcp-server.md`](docs/phases/phase-08-local-mcp-server.md) for the architecture and validation scope.
 
 ## ⚡ Quick Start
 
@@ -53,12 +57,12 @@ Ready to lock in your AI context?
 4. Answer the questions as they come.
 5. Save the final output as your `profile.md`.
 
-> **Pro Tip:** Keep your `profile.md` handy! You can paste it into ChatGPT's Custom Instructions, Claude's Project Knowledge, or use it with our upcoming local MCP server.
+> **Pro Tip:** Keep your `profile.md` handy! You can paste it into ChatGPT's Custom Instructions, Claude's Project Knowledge, or connect it through the local MCP server.
 
 ---
 
 ## 🤝 Contributing
 
-MySpec is an open-source movement to make AI interactions more human and tailored. We welcome contributions, whether it's refining the prompts, adding new language translations, or building out the MCP server!
+MySpec is an open-source movement to make AI interactions more human and tailored. We welcome contributions, whether it's refining the prompts, adding new language translations, or improving the local MCP server!
 
 ---
