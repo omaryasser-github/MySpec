@@ -13,12 +13,21 @@ The system has one central profile and two operational feedback paths. The inter
 
 ```text
 						+----------------------+
-						|     MCP Server       |
-						|  AI skills + routing |
-						|  prompt triggers     |
+						| Existing AI Host    |
+						| MCP client + model  |
 						+----------+-----------+
-								 |
+								 | local stdio
 								 v
+						+----------------------+
+						| MySpec MCP Server   |
+						| resources, tools,   |
+						| prompts (read-only) |
+						+----------+-----------+
+								 | local file read
+								 v
+						+----------------------+
+						| ~/.myspec/profile.md|
+						+----------------------+
 +----------------------+      +---------+----------+
 | master-interview.md  | ---> |   Profile Output   |
 | 50 questions /       |      |   Source of Truth  |
@@ -29,7 +38,7 @@ The system has one central profile and two operational feedback paths. The inter
 				before work    |           | after work
 							v           v
 				  +------------+--+   +----+-------------+
-				  | project-      |   | profile-update.md|
+				  | project_      |   | profile_update.md|
 				  | onboarding.md |   | evidence-based   |
 				  | gap analysis  |   | profile growth   |
 				  +---------------+   +------------------+
@@ -81,7 +90,7 @@ The profile output consolidates the interview into an actionable developer ident
 > [!IMPORTANT]
 > Treat the canonical profile as the source of truth for downstream workflows. Derived or localized outputs should remain consistent with the canonical profile rather than becoming competing records.
 
-### 03 | `project-onboarding.md`
+### 03 | `project_onboarding.md`
 
 > **Role:** Strategic project-to-profile integration
 
@@ -97,7 +106,7 @@ Before implementation begins, project onboarding maps each material requirement 
 
 The result is a project plan calibrated to the user's actual starting point rather than a generic checklist.
 
-### 04 | `profile-update.md`
+### 04 | `profile_update.md`
 
 > **Role:** Evidence-based identity iteration
 
@@ -112,20 +121,21 @@ After a project is complete, profile update compares the current profile with co
 
 This creates a dynamic profile without restarting the master interview or silently rewriting the user's identity.
 
-## The Engine: MCP Server Integration
+## The Engine: Local MCP Server
 
-The MCP Server acts as the orchestration layer between the profile and the operational prompts. It dynamically supplies the relevant context, selects the appropriate AI skill, and routes the result to the next stage.
+The local MCP server is a read-only stdio child process launched and owned by the user's existing AI host. The host is the MCP client: it discovers resources, calls tools, and selects prompts. The server reads `~/.myspec/profile.md` on demand (or `MYSPEC_PROFILE_PATH`) and exposes local context without implementing a separate client or server-side AI skill router.
 
-| Engine responsibility | System effect |
+| MCP surface | Local capability |
 | --- | --- |
-| Context loading | Provides the profile, project brief, constraints, or completed-work evidence required by the active workflow. |
-| Skill routing | Invokes the appropriate AI skill for interview, output generation, onboarding, or profile update. |
-| Prompt triggering | Supports explicit triggers such as `/skill-name` to select a workflow without manual context assembly. |
-| State continuity | Carries confirmed facts, profile state, and workflow results between connected stages. |
-| Human control | Preserves required clarification, approval, and identity ownership boundaries. |
+| Resources | `myprofile://summary`, `myprofile://skills`, `myprofile://preferences`, and `myprofile://full` provide focused views of the profile. |
+| Tools | `get_gap_analysis(project_description)` returns local profile evidence and explicit technology-term matches; `get_onboarding_plan(topic, minutes=60)` returns a time-boxed learning outline. |
+| Prompts | `onboarding(project_description)` and `gap_check(project_description)` package the project description and profile context for the host model. |
+| Configuration | `MYSPEC_PROFILE_PATH` selects an alternate local file; `MYSPEC_LANG` selects English or MSA response labels. |
+
+The server uses the local process and filesystem permissions as its trust boundary. It reads the profile without modifying it, uses stdio only, and makes no network calls. Missing or malformed profile files return readable status information so the host can continue with appropriate caveats.
 
 > [!NOTE]
-> The engine removes repeated setup work; it does not remove the user's authority over personal identity, ambiguous facts, proposed skill additions, or final profile state.
+> The host controls model execution and any handling after it receives context. The MySpec server itself exposes no remote transport, authentication layer, or cloud integration.
 
 ## Best Practices for Maximum Utility
 
