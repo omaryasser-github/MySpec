@@ -37,6 +37,12 @@ Whenever you start a new project, your AI already knows what you know—and exac
 
 ---
 
+### Phase 7: Workflow Documentation & System Utility
+
+Phase 7 documents how the MySpec components operate as one connected system and how users can maximize the value of their profile. It covers the progression from the 50-question interview to profile generation, project onboarding, and evidence-based profile updates, with the MCP Server coordinating context through AI skills.
+
+See the complete guide in [`docs/how-it-works.md`](docs/how-it-works.md) and the implementation record in [`docs/phases/phase-07-how-it-works.md`](docs/phases/phase-07-how-it-works.md).
+
 ## ⚡ Quick Start
 
 Ready to lock in your AI context?
