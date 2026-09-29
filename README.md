@@ -22,7 +22,7 @@ Whenever you start a new project, your AI already knows what you know—and exac
 
 * 🧠 **Zero-Fatigue Interview:** 50 curated questions across 7 categories, asked just *two at a time* using advanced state-machine prompting.
 * ⚡ **Single-File Context (`profile.md`):** Your entire persona is compiled into one dense file. This prevents the LLM "lost in the middle" effect and ensures lightning-fast retrieval.
-* 🌍 **Trilingual Support:** Native prompt templates in English, Modern Standard Arabic (MSA), and Egyptian Arabic.
+* 🌍 **Bilingual Support:** Native prompt templates in English and Modern Standard Arabic (MSA).
 * ⏱️ **60-Minute Onboarding:** Bring a new project idea to your "Dialed-In" AI, and it will perform a gap analysis, telling you exactly what to leverage and what new skills to learn in your first hour.
 * 🔌 **Local MCP Server:** Run a read-only stdio server that supplies your local profile to existing MCP hosts such as Cursor, Claude Desktop, and Windsurf. The server exposes no network transport and makes no network calls.
 
