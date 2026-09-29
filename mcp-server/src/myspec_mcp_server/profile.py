@@ -91,14 +91,23 @@ def get_language(environ: Mapping[str, str] | None = None) -> str:
 
 
 def get_profile_path(environ: Mapping[str, str] | None = None) -> Path:
-    """Resolve the configured profile path without creating or modifying it."""
+    """Resolve the configured profile path without creating or modifying it.
+
+    Checks MYSPEC_PROFILE_PATH first, then ~/.myspec/profile.md, falling back
+    automatically to ~/.myspec/profile.json if profile.md is absent.
+    """
 
     env = os.environ if environ is None else environ
     override = env.get("MYSPEC_PROFILE_PATH", "").strip()
     if override:
         expanded = os.path.expandvars(os.path.expanduser(override))
         return Path(expanded).resolve()
-    return (Path.home() / ".myspec" / "profile.md").resolve()
+
+    default_md = (Path.home() / ".myspec" / "profile.md").resolve()
+    default_json = (Path.home() / ".myspec" / "profile.json").resolve()
+    if not default_md.exists() and default_json.exists():
+        return default_json
+    return default_md
 
 
 def _extract_json_payload(text: str) -> str | None:

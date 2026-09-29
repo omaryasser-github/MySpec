@@ -81,6 +81,24 @@ class ProfileLoadingTests(unittest.TestCase):
         self.assertEqual(get_language({"MYSPEC_LANG": "unsupported"}), "en")
         self.assertEqual(get_language({}), "en")
 
+    def test_profile_path_falls_back_to_json_when_md_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as fake_home:
+            fake_home_path = Path(fake_home)
+            myspec_dir = fake_home_path / ".myspec"
+            myspec_dir.mkdir()
+            json_file = myspec_dir / "profile.json"
+            json_file.write_text('{"identity": {}}', encoding="utf-8")
+
+            with unittest.mock.patch("pathlib.Path.home", return_value=fake_home_path):
+                resolved = get_profile_path({})
+                self.assertEqual(resolved, json_file.resolve())
+
+                # If profile.md is also created, profile.md takes priority
+                md_file = myspec_dir / "profile.md"
+                md_file.write_text("# Profile", encoding="utf-8")
+                resolved_with_md = get_profile_path({})
+                self.assertEqual(resolved_with_md, md_file.resolve())
+
     def test_minutes_are_distributed_exactly_and_terms_are_local(self) -> None:
         for total in (5, 60, 137, 480):
             self.assertEqual(sum(allocate_minutes(total)), total)
