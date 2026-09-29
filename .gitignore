@@ -1,6 +1,3 @@
-# The ar-eg questions is not nessary to be included now.
-*AR-EG
-
 .venv*/
 __pycache__/
 *.py[cod]
