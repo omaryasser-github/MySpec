@@ -37,15 +37,13 @@ Whenever you start a new project, your AI already knows what you know—and exac
 
 ---
 
-### Phase 7: Workflow Documentation & System Utility
-
-Phase 7 documents how the MySpec components operate as one connected system and how users can maximize the value of their profile. It covers the progression from the interview to profile generation, project onboarding, and evidence-based profile updates.
+### The complete guide
 
 See the complete guide in [`docs/how-it-works.md`](docs/how-it-works.md) and the implementation record in [`docs/phases/phase-07-how-it-works.md`](docs/phases/phase-07-how-it-works.md).
 
-### Phase 8: Local MCP Server
+### Local MCP Server
 
-Phase 8 adds a local-only stdio MCP server for reading the MySpec profile and supplying context to an existing AI host. See [`mcp-server/README.md`](mcp-server/README.md) for installation and host configuration, and [`docs/phases/phase-08-local-mcp-server.md`](docs/phases/phase-08-local-mcp-server.md) for the architecture and validation scope.
+Adds a local-only stdio MCP server for reading the MySpec profile and supplying context to an existing AI host. See [`mcp-server/README.md`](mcp-server/README.md) for installation and host configuration, and [`docs/phases/phase-08-local-mcp-server.md`](docs/phases/phase-08-local-mcp-server.md) for the architecture and validation scope.
 
 ## ⚡ Quick Start
 
