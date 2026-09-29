@@ -65,7 +65,8 @@ The system has one central profile and two operational feedback paths. The inter
 
 | Capability | How it works | Why it matters |
 | --- | --- | --- |
-| Structured coverage | Asks 50 questions across 7 categories in a defined order. | Reduces blind spots across identity, communication, skills, workflow, decisions, goals, and context. |
+| Structured coverage | Asks 50 canonical questions (`Q01`–`Q50`) across 7 categories in a defined order. | Reduces blind spots across identity, communication, skills, workflow, decisions, goals, and context. |
+| Self-contained delivery | Embeds the full question bank in English and Modern Standard Arabic directly in the prompt. | Allows immediate execution in any web LLM without local filesystem access. |
 | Progressive summarization | Condenses each answer into a fact-dense working summary while the interview advances. | Preserves signal without producing an unusably large profile. |
 | Category summaries | Summarizes each completed category and marks unresolved uncertainty. | Makes the collected information reviewable before profile generation. |
 | Clarification handling | Pauses on meaningful conflicts or ambiguous answers rather than inferring facts. | Protects the fidelity of the final profile. |
@@ -77,7 +78,7 @@ The system has one central profile and two operational feedback paths. The inter
 
 > **Role:** Canonical source of truth for personalization
 
-The profile output consolidates the interview into an actionable developer identity. Its most important dimensions are:
+The profile output consolidates the interview into an actionable developer identity. It is persisted as `profile.json` (machine SSOT) or `profile.md` (human-readable companion):
 
 | Profile dimension | What it represents |
 | --- | --- |
@@ -88,7 +89,7 @@ The profile output consolidates the interview into an actionable developer ident
 | **Growth direction** | Current learning areas and longer-term goals that should influence project recommendations. |
 
 > [!IMPORTANT]
-> Treat the canonical profile as the source of truth for downstream workflows. Derived or localized outputs should remain consistent with the canonical profile rather than becoming competing records.
+> Treat the canonical profile as the source of truth for downstream workflows. The local MCP server automatically discovers and loads either `~/.myspec/profile.json` or `~/.myspec/profile.md`.
 
 ### 03 | `project_onboarding.md`
 
@@ -108,29 +109,29 @@ The result is a project plan calibrated to the user's actual starting point rath
 
 ### 04 | `profile_update.md`
 
-> **Role:** Evidence-based identity iteration
+> **Role:** Evidence-based identity iteration and state management
 
-After a project is complete, profile update compares the current profile with completed deliverables, applied technologies, and verified implementation depth.
+After a project is complete, profile update compares the current profile with completed deliverables, applied technologies, and verified implementation depth using a strict Semantic Versioning policy and a 5-level Implementation Depth Rubric.
 
 | Update class | Treatment |
 | --- | --- |
-| **Core identity** | Remains human-controlled and read-only for automated updates. |
-| **New skill or tool** | Returned as a proposed addition requiring explicit approval. |
-| **Existing skill** | May receive a proficiency update when concrete implementation evidence supports it. |
+| **Core identity (Major `X.0.0`)** | Remains human-controlled and read-only for automated updates. |
+| **New skill or tool (Minor `X.Y.0`)** | Returned as a proposed addition requiring explicit user approval. |
+| **Existing skill (Patch `X.Y.Z`)** | Auto-incremented via RFC 6902 JSON Patch only when concrete implementation depth supports it. |
 | **Unsupported plan** | Produces no skill increase because intended work is not delivery evidence. |
 
-This creates a dynamic profile without restarting the master interview or silently rewriting the user's identity.
+This creates a dynamic, auditable profile without restarting the master interview or silently rewriting the user's identity.
 
 ## The Engine: Local MCP Server
 
-The local MCP server is a read-only stdio child process launched and owned by the user's existing AI host. The host is the MCP client: it discovers resources, calls tools, and selects prompts. The server reads `~/.myspec/profile.md` on demand (or `MYSPEC_PROFILE_PATH`) and exposes local context without implementing a separate client or server-side AI skill router.
+The local MCP server is a read-only stdio child process launched and owned by the user's existing AI host. The host is the MCP client: it discovers resources, calls tools, and selects prompts. The server reads `~/.myspec/profile.md` on demand (falling back to `~/.myspec/profile.json` if absent, or using `MYSPEC_PROFILE_PATH`) and exposes local context without implementing a separate client or server-side AI skill router.
 
 | MCP surface | Local capability |
 | --- | --- |
 | Resources | `myprofile://summary`, `myprofile://skills`, `myprofile://preferences`, and `myprofile://full` provide focused views of the profile. |
-| Tools | `get_gap_analysis(project_description)` returns local profile evidence and explicit technology-term matches; `get_onboarding_plan(topic, minutes=60)` returns a time-boxed learning outline. |
+| Tools | `get_gap_analysis(project_description)` returns local profile evidence and collision-free technology matches; `get_onboarding_plan(topic, minutes=60)` returns a time-boxed learning outline. |
 | Prompts | `onboarding(project_description)` and `gap_check(project_description)` package the project description and profile context for the host model. |
-| Configuration | `MYSPEC_PROFILE_PATH` selects an alternate local file; `MYSPEC_LANG` selects English or MSA response labels. |
+| Configuration | `MYSPEC_PROFILE_PATH` selects an alternate local file (`.md` or `.json`); `MYSPEC_LANG` selects English or MSA response labels. |
 
 The server uses the local process and filesystem permissions as its trust boundary. It reads the profile without modifying it, uses stdio only, and makes no network calls. Missing or malformed profile files return readable status information so the host can continue with appropriate caveats.
 
