@@ -106,6 +106,50 @@ class ProfileLoadingTests(unittest.TestCase):
         terms = find_technology_terms("Build a FastAPI service with PostgreSQL and React.")
         self.assertEqual(terms, ["postgresql", "fastapi", "react"])
 
+    def test_technology_terms_avoids_substring_collisions(self) -> None:
+        # "React Native" should only match "react native", not "react"
+        terms_single = find_technology_terms("Build a modern mobile app with React Native and PostgreSQL.")
+        self.assertEqual(terms_single, ["react native", "postgresql"])
+        self.assertNotIn("react", terms_single)
+
+        # If both are independently mentioned, both should match
+        terms_both = find_technology_terms("We use React Native for mobile and React for the web portal.")
+        self.assertIn("react native", terms_both)
+        self.assertIn("react", terms_both)
+
+    def test_markdown_parser_handles_code_blocks_and_nested_headers(self) -> None:
+        raw_md = (
+            "# Developer Profile\n"
+            "## Skills\n"
+            "- Python: proficient\n"
+            "```python\n"
+            "# Configure database connection\n"
+            "db = connect(host='localhost')\n"
+            "```\n"
+            "## Communication\n"
+            "- Direct and concise\n"
+        )
+        profile_file = self.root / "code_block_profile.md"
+        profile_file.write_text(raw_md, encoding="utf-8")
+        snapshot = load_profile(profile_file)
+
+        self.assertEqual(snapshot.status, "available")
+        skills_text = resource_text(snapshot, "skills")
+        # Ensure code comment was NOT treated as a separate section header
+        self.assertIn("# Configure database connection", skills_text)
+        self.assertIn("Python: proficient", skills_text)
+
+        # Communication section is preserved intact
+        pref_text = resource_text(snapshot, "preferences")
+        self.assertIn("Direct and concise", pref_text)
+
+    def test_allocate_minutes_lower_bound_safety(self) -> None:
+        # Sessions below 5 minutes should clamp safely to 5 minutes
+        for invalid_total in (4, 1, 0, -10):
+            allocated = allocate_minutes(invalid_total)
+            self.assertEqual(sum(allocated), 5)
+            self.assertTrue(all(v >= 1 for v in allocated))
+
 
 if __name__ == "__main__":
     unittest.main()

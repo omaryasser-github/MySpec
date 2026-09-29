@@ -156,20 +156,46 @@ def _json_block(value: Any) -> str:
 
 
 def _markdown_sections(text: str) -> list[tuple[str, str]]:
-    sections: list[tuple[str, list[str]]] = []
+    """Parse Markdown text into sections, respecting code blocks and header hierarchy."""
+
+    sections: list[tuple[str, str]] = []
     current_title = "Profile"
     current_lines: list[str] = []
+    in_code_block = False
+    header_stack: list[tuple[int, str]] = []
+
     for line in text.splitlines():
-        if line.lstrip().startswith("#"):
-            if current_lines:
-                sections.append((current_title, current_lines))
-            current_title = re.sub(r"^\s*#+\s*", "", line).strip()
-            current_lines = []
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            current_lines.append(line)
+            continue
+
+        if not in_code_block and line.lstrip().startswith("#"):
+            hashes = len(line.lstrip()) - len(line.lstrip().lstrip("#"))
+            title_text = line.lstrip()[hashes:].strip()
+
+            body = "\n".join(current_lines).strip()
+            if body:
+                sections.append((current_title, body))
+                current_lines = []
+
+            while header_stack and header_stack[-1][0] >= hashes:
+                header_stack.pop()
+            header_stack.append((hashes, title_text))
+
+            if len(header_stack) > 1:
+                current_title = " - ".join(h[1] for h in header_stack if h[1])
+            else:
+                current_title = title_text
         else:
             current_lines.append(line)
-    if current_lines:
-        sections.append((current_title, current_lines))
-    return [(title, "\n".join(lines).strip()) for title, lines in sections if "\n".join(lines).strip()]
+
+    body = "\n".join(current_lines).strip()
+    if body:
+        sections.append((current_title, body))
+
+    return sections
 
 
 def _markdown_view(snapshot: ProfileSnapshot, keywords: tuple[str, ...]) -> str:
@@ -255,14 +281,25 @@ TECH_TERMS = (
 
 
 def find_technology_terms(text: str) -> list[str]:
-    """Find a small, explicit built-in vocabulary without network lookups."""
+    """Find a small, explicit built-in vocabulary without network lookups or substring collisions."""
 
-    found = []
     lowered = text.lower()
-    for term in TECH_TERMS:
-        if re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", lowered):
-            found.append(term)
-    return found
+    terms_by_length = sorted(TECH_TERMS, key=len, reverse=True)
+    claimed_spans: list[tuple[int, int]] = []
+    matched_terms: set[str] = set()
+
+    for term in terms_by_length:
+        pattern = rf"(?<![\w]){re.escape(term)}(?![\w])"
+        valid_term_match = False
+        for match in re.finditer(pattern, lowered):
+            start, end = match.span()
+            if not any(cs[0] <= start and end <= cs[1] for cs in claimed_spans):
+                claimed_spans.append((start, end))
+                valid_term_match = True
+        if valid_term_match:
+            matched_terms.add(term)
+
+    return [term for term in TECH_TERMS if term in matched_terms]
 
 
 def gap_analysis_payload(snapshot: ProfileSnapshot, project_description: str, language: str | None = None) -> dict[str, Any]:
@@ -294,7 +331,10 @@ def gap_analysis_payload(snapshot: ProfileSnapshot, project_description: str, la
 
 
 def allocate_minutes(total: int) -> list[int]:
-    """Distribute a positive session duration across five weighted stages."""
+    """Distribute a session duration across five weighted stages, enforcing a minimum of 5 minutes."""
+
+    if total < 5:
+        total = 5
 
     weights = (10, 15, 40, 25, 10)
     allocated = [1] * len(weights)
