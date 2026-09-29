@@ -19,6 +19,7 @@ Standardize file taxonomy and eliminate shell hazards, typographical errors, and
 ## 3. Key Tasks & Subtasks
 
 ### Task 1: Normalize Question Bank Filenames
+*(Note: Completed during Phase 9.1 to align canonical question formulation and prevent redundant edits).*
 * Adopt strict, POSIX-compliant kebab-case across all question files:
   * Rename English files:
     * `03-knowledge-&-skill.md` $\rightarrow$ `03-knowledge-and-skills.md`

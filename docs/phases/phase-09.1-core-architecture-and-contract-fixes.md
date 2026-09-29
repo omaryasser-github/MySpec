@@ -20,6 +20,7 @@ Establish robust foundational data contracts across the MySpec system by:
 ## 3. Key Tasks & Subtasks
 
 ### Task 1: Formulate the Canonical 50-Question Bank (Issue B)
+> **Note on File Naming Normalization:** To prevent redundant rewrites and broken references, question filenames with shell hazards (`&`), typos (`gools`), and inconsistent casing were normalized to strict kebab-case in this task ahead of Phase 9.4 (`03-knowledge-and-skills.md`, `04-tools-and-workflows.md`, `05-decision-making.md`, `06-goals-and-priorities.md`, and their MSA counterparts).
 * Convert the 50 topic headings across the 7 categories into explicit, formulated interview questions with immutable IDs:
   * **Category 1: Identity & Work:** `Q01` through `Q10`
   * **Category 2: Communication Style:** `Q11` through `Q18`
