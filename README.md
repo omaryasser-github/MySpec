@@ -53,9 +53,9 @@ Ready to lock in your AI context?
 2. Copy the entire prompt text.
 3. Paste it into a new chat with your preferred AI model.
 4. Answer the questions as they come.
-5. Save the final output as your `profile.md`.
+5. Save the final output to `~/.myspec/profile.md` (or `~/.myspec/profile.json`).
 
-> **Pro Tip:** Keep your `profile.md` handy! You can paste it into ChatGPT's Custom Instructions, Claude's Project Knowledge, or connect it through the local MCP server.
+> **Pro Tip:** Keep your profile file handy in `~/.myspec/`! You can paste it into ChatGPT's Custom Instructions, Claude's Project Knowledge, or let the local MCP server discover it automatically.
 
 ---
 

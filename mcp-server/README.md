@@ -2,13 +2,13 @@
 
 The MySpec MCP server exposes a user's local profile to an existing MCP-capable AI host. The host launches this package as a child process and acts as the MCP client; this repository does not include a separate client application.
 
-The server uses **stdio only**. It reads `~/.myspec/profile.md` on demand and does not write the profile. It provides no authentication, ports, HTTP transport, cloud service, database, telemetry, update check, or network call.
+The server uses **stdio only**. It reads `~/.myspec/profile.md` (or `~/.myspec/profile.json` if `.md` is absent) on demand and does not write the profile. It provides no authentication, ports, HTTP transport, cloud service, database, telemetry, update check, or network call.
 
 ## Requirements
 
 - Python 3.10 or newer.
 - Cursor, Claude Desktop, Windsurf, or another MCP host that supports stdio servers.
-- A local Markdown profile at `~/.myspec/profile.md` (or a path supplied with `MYSPEC_PROFILE_PATH`).
+- A local profile at `~/.myspec/profile.md` or `~/.myspec/profile.json` (or a path supplied with `MYSPEC_PROFILE_PATH`).
 
 ## Local installation
 
@@ -70,7 +70,7 @@ The server reads the profile afresh on each call. Missing, unreadable, empty, or
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MYSPEC_PROFILE_PATH` | `~/.myspec/profile.md` | Override the local profile path. |
+| `MYSPEC_PROFILE_PATH` | `~/.myspec/profile.md` (or `profile.json`) | Override the local profile path. |
 | `MYSPEC_LANG` | `en` | Select English or Modern Standard Arabic response labels. |
 
 The profile path is read-only. The local OS process and filesystem permissions are the trust boundary.
