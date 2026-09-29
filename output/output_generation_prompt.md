@@ -168,10 +168,12 @@ The JSON Patch operation list is an internal update mechanism. Persist the resul
 
 Normalize the requested choice to one of `bilingual`, `english_only`, `arabic_only`, or `none`. Use `english_only` when the preference is absent or invalid and no clarification is available.
 
-- `english_only`: persist and emit the validated canonical English `profile.json`.
+- `english_only`: persist and emit the validated canonical English `profile.json` (and companion `profile.md`).
 - `none`: persist and emit the validated canonical English `profile.json`; omit localized exports.
-- `bilingual`: persist and emit canonical `profile.json`, then generate and emit derived `profile_ar.json` and `profile_ar.md`.
+- `bilingual`: persist and emit canonical `profile.json` (and companion `profile.md`), then generate and emit derived `profile_ar.json` and `profile_ar.md`.
 - `arabic_only`: persist canonical `profile.json` as the SSOT, then generate and emit derived `profile_ar.json` and `profile_ar.md` as the user-facing localized artifacts.
+
+The canonical `profile.json` is the definitive machine-readable Single Source of Truth (SSOT). When saving locally to `~/.myspec/`, systems may persist the canonical JSON as `profile.json` or render it as `profile.md`; the MySpec MCP server seamlessly discovers and loads either file.
 
 The `profile_ar.json` artifact uses the same JSON shape and stable property keys as the canonical profile so software can consume either locale consistently. Translate human-readable string values and descriptions into Modern Standard Arabic. Preserve the metadata enum values, stable question IDs, key names, library/framework/product names, programming-language identifiers, commands, URLs, code, and syntax in standard technical form. Preserve numbers, units, dates, uncertainty, skipped items, and the original factual scope. Translate faithfully without adding conclusions or omitting information.
 
@@ -179,7 +181,7 @@ Format `profile_ar.md` from the same canonical facts and Arabic translation. Use
 
 ## Emission contract
 
-Validate before emitting. Emit the canonical artifact as valid UTF-8 JSON with the exact schema fields and no comments or trailing commas. When Arabic export is requested, emit the two derived files after the canonical profile and label each artifact with its filename. When the environment supports file persistence, write the artifacts using those filenames; otherwise return clearly separated named artifact contents. Keep explanatory prose outside JSON artifacts.
+Validate before emitting. Emit the canonical artifact as valid UTF-8 JSON with the exact schema fields and no comments or trailing commas. When Arabic export is requested, emit the two derived files after the canonical profile and label each artifact with its filename. When the environment supports file persistence, write the artifacts using those filenames (`profile.json`, `profile.md`, `profile_ar.json`, `profile_ar.md`); otherwise return clearly separated named artifact contents. Keep explanatory prose outside JSON artifacts.
 
 ## Visual architecture flow
 
