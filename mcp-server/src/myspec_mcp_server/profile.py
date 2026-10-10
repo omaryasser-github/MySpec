@@ -6,6 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -347,3 +348,133 @@ def allocate_minutes(total: int) -> list[int]:
         weighted_minutes[idx] += 1
     allocated = [base + weighted for base, weighted in zip(allocated, weighted_minutes)]
     return allocated
+
+
+QUESTION_MODULE_MAPPING: dict[str, list[str]] = {}
+for _q_num in range(1, 11):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["identity", "work_context"]
+for _q_num in range(11, 19):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["communication_prefs"]
+for _q_num in range(19, 26):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["current_skills", "learning_in_progress", "limitations"]
+for _q_num in range(26, 33):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["current_skills", "work_context", "limitations"]
+for _q_num in range(33, 39):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["limitations", "communication_prefs", "work_context"]
+for _q_num in range(39, 45):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["growth_goals", "work_context"]
+for _q_num in range(45, 51):
+    QUESTION_MODULE_MAPPING[f"Q{_q_num:02d}"] = ["work_context", "communication_prefs", "limitations"]
+
+
+def build_profile(
+    answers: dict[str, str],
+    existing_profile: dict[str, Any] | None = None,
+    language: str = "en",
+) -> dict[str, Any]:
+    """Transform collected interview answers into a canonical MySpec profile dict.
+
+    Args:
+        answers: Mapping of question IDs (e.g. "Q01") to user responses.
+        existing_profile: Optional previous profile dictionary for incremental updates.
+        language: Language code ("en" or "ar").
+
+    Returns:
+        Structured dictionary adhering to canonical MySpec profile schema.
+    """
+    if existing_profile:
+        profile: dict[str, Any] = json.loads(json.dumps(existing_profile))
+    else:
+        profile = {
+            "schema_version": 1,
+            "status": "partial",
+            "completion_rate": 0.0,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "language": language,
+            "identity": {},
+            "work_context": {},
+            "communication_prefs": {},
+            "current_skills": {},
+            "learning_in_progress": {},
+            "limitations": {},
+            "growth_goals": {},
+            "skipped_fields": [],
+        }
+
+    skipped_set = set(profile.get("skipped_fields", []))
+
+    for raw_id, raw_answer in answers.items():
+        q_id = raw_id.strip().upper()
+        answer_text = str(raw_answer).strip() if raw_answer is not None else ""
+
+        if not answer_text or answer_text in {"__SKIPPED__", "__DECLINED__"}:
+            skipped_set.add(q_id)
+            for module_name in QUESTION_MODULE_MAPPING.get(q_id, []):
+                if module_name not in profile or not isinstance(profile[module_name], dict):
+                    profile[module_name] = {}
+                profile[module_name][q_id] = answer_text or "__SKIPPED__"
+        else:
+            skipped_set.discard(q_id)
+            for module_name in QUESTION_MODULE_MAPPING.get(q_id, []):
+                if module_name not in profile or not isinstance(profile[module_name], dict):
+                    profile[module_name] = {}
+                profile[module_name][q_id] = answer_text
+
+    profile["skipped_fields"] = sorted(skipped_set)
+
+    # Recalculate answered count and completion rate
+    all_answered_ids: set[str] = set()
+    for mod in (
+        "identity",
+        "work_context",
+        "communication_prefs",
+        "current_skills",
+        "learning_in_progress",
+        "limitations",
+        "growth_goals",
+    ):
+        mod_dict = profile.get(mod)
+        if isinstance(mod_dict, dict):
+            for q_k, val in mod_dict.items():
+                val_str = str(val).strip() if val is not None else ""
+                if val_str and val_str not in {"__SKIPPED__", "__DECLINED__"}:
+                    all_answered_ids.add(q_k)
+
+    answered_count = len(all_answered_ids)
+    completion_rate = round(min(answered_count / 50.0, 1.0), 2)
+    profile["completion_rate"] = completion_rate
+    profile["status"] = "complete" if completion_rate >= 1.0 else "partial"
+    profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+    profile["language"] = language
+
+    return profile
+
+
+def save_profile(profile_data: dict[str, Any], target_path: Path | None = None) -> Path:
+    """Atomically save profile data to disk in JSON format.
+
+    Args:
+        profile_data: The profile dictionary to persist.
+        target_path: Optional destination path; defaults to get_profile_path().
+
+    Returns:
+        Path to the saved profile.json.
+    """
+    if target_path is not None:
+        destination_path = target_path.expanduser().resolve()
+    else:
+        current_path = get_profile_path()
+        if current_path.suffix.lower() == ".md":
+            destination_path = current_path.with_name("profile.json").resolve()
+        else:
+            destination_path = current_path.resolve()
+
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination_path.with_suffix(".json.tmp")
+    temp_path.write_text(
+        json.dumps(profile_data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    temp_path.replace(destination_path)
+    return destination_path
+

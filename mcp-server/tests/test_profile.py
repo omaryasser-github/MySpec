@@ -4,14 +4,17 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from myspec_mcp_server.profile import (
     allocate_minutes,
+    build_profile,
     find_technology_terms,
     get_language,
     get_profile_path,
     load_profile,
     resource_text,
+    save_profile,
 )
 
 
@@ -149,6 +152,89 @@ class ProfileLoadingTests(unittest.TestCase):
             allocated = allocate_minutes(invalid_total)
             self.assertEqual(sum(allocated), 5)
             self.assertTrue(all(v >= 1 for v in allocated))
+
+    def test_build_profile_full_50_questions(self) -> None:
+        answers = {f"Q{i:02d}": f"Detailed answer for question {i}" for i in range(1, 51)}
+        profile = build_profile(answers, language="en")
+
+        self.assertEqual(profile["status"], "complete")
+        self.assertEqual(profile["completion_rate"], 1.0)
+        self.assertEqual(profile["language"], "en")
+        self.assertEqual(profile["skipped_fields"], [])
+
+        # Verify all 7 module dictionaries are populated
+        for module in (
+            "identity",
+            "work_context",
+            "communication_prefs",
+            "current_skills",
+            "learning_in_progress",
+            "limitations",
+            "growth_goals",
+        ):
+            self.assertIn(module, profile)
+            self.assertIsInstance(profile[module], dict)
+            self.assertTrue(len(profile[module]) > 0)
+
+        # Check module membership mapping
+        self.assertEqual(profile["identity"]["Q01"], "Detailed answer for question 1")
+        self.assertEqual(profile["communication_prefs"]["Q11"], "Detailed answer for question 11")
+        self.assertEqual(profile["growth_goals"]["Q39"], "Detailed answer for question 39")
+
+    def test_build_profile_partial_and_skipped_fields(self) -> None:
+        answers = {f"Q{i:02d}": f"Answer {i}" for i in range(1, 26)}
+        answers["Q07"] = "__SKIPPED__"
+        answers["Q14"] = "__SKIPPED__"
+        answers["Q20"] = "__SKIPPED__"
+        answers["Q22"] = "__SKIPPED__"
+        answers["Q25"] = "__SKIPPED__"
+        # 25 total supplied, 5 skipped -> 20 answered out of 50 -> 0.4 completion rate
+        profile = build_profile(answers, language="en")
+
+        self.assertEqual(profile["status"], "partial")
+        self.assertEqual(profile["completion_rate"], 0.4)
+        self.assertEqual(profile["skipped_fields"], ["Q07", "Q14", "Q20", "Q22", "Q25"])
+
+    def test_build_profile_merges_with_existing(self) -> None:
+        initial_answers = {"Q01": "Initial role", "Q02": "Initial industry"}
+        initial_profile = build_profile(initial_answers)
+
+        update_answers = {"Q01": "Updated senior role", "Q03": "New experience"}
+        merged = build_profile(update_answers, existing_profile=initial_profile)
+
+        self.assertEqual(merged["identity"]["Q01"], "Updated senior role")
+        self.assertEqual(merged["identity"]["Q02"], "Initial industry")
+        self.assertEqual(merged["identity"]["Q03"], "New experience")
+
+    def test_save_profile_atomic_and_dir_creation(self) -> None:
+        target_dir = self.root / "nested" / "deep"
+        target_file = target_dir / "profile.json"
+        data = {"schema_version": 1, "status": "complete", "completion_rate": 1.0}
+
+        saved_path = save_profile(data, target_file)
+        self.assertEqual(saved_path, target_file.resolve())
+        self.assertTrue(saved_path.is_file())
+
+        # Verify .tmp file was cleaned up by atomic rename
+        tmp_file = saved_path.with_suffix(".json.tmp")
+        self.assertFalse(tmp_file.exists())
+
+        # Verify contents
+        loaded = json.loads(saved_path.read_text(encoding="utf-8"))
+        self.assertEqual(loaded["status"], "complete")
+
+    def test_save_and_load_round_trip(self) -> None:
+        answers = {f"Q{i:02d}": f"Answer {i}" for i in range(1, 51)}
+        built = build_profile(answers)
+
+        target_file = self.root / "roundtrip_profile.json"
+        save_profile(built, target_file)
+
+        snapshot = load_profile(target_file)
+        self.assertEqual(snapshot.status, "available")
+        self.assertEqual(snapshot.format, "json")
+        self.assertIsNotNone(snapshot.data)
+        self.assertEqual(snapshot.data.get("completion_rate"), 1.0)
 
 
 if __name__ == "__main__":
