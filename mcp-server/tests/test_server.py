@@ -55,8 +55,55 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
             tools = await client.list_tools()
             self.assertEqual(
                 {tool.name for tool in tools.tools},
-                {"get_gap_analysis", "get_onboarding_plan"},
+                {
+                    "get_gap_analysis",
+                    "get_onboarding_plan",
+                    "start_interview",
+                    "advance_interview",
+                    "finalize_interview",
+                },
             )
+
+            # Test start_interview tool
+            start = await client.call_tool("start_interview", {"language": "en"})
+            start_data = start.structured_content
+            self.assertEqual(start_data["pair_index"], 0)
+            self.assertEqual(start_data["status"], "in_progress")
+            self.assertEqual([q["id"] for q in start_data["questions"]], ["Q01", "Q02"])
+            self.assertEqual(start_data["category_name"], "Identity & Work")
+
+            # Test advance_interview tool
+            advance = await client.call_tool(
+                "advance_interview",
+                {
+                    "pair_index": 0,
+                    "answers_so_far": {"Q01": "Software Engineer", "Q02": "Tech"},
+                    "language": "en",
+                },
+            )
+            advance_data = advance.structured_content
+            self.assertEqual(advance_data["pair_index"], 1)
+            self.assertEqual([q["id"] for q in advance_data["questions"]], ["Q03", "Q04"])
+
+            # Test advance_interview completion boundary
+            complete = await client.call_tool(
+                "advance_interview",
+                {
+                    "pair_index": 24,
+                    "answers_so_far": {"Q01": "Answer"},
+                    "language": "en",
+                },
+            )
+            self.assertEqual(complete.structured_content["status"], "interview_complete")
+            self.assertTrue(complete.structured_content["ready_to_finalize"])
+
+            # Test finalize_interview tool
+            mock_answers = {f"Q{i:02d}": f"Mock answer {i}" for i in range(1, 51)}
+            finalize = await client.call_tool("finalize_interview", {"answers": mock_answers, "language": "en"})
+            finalize_data = finalize.structured_content
+            self.assertEqual(finalize_data["status"], "saved")
+            self.assertEqual(finalize_data["completion_rate"], 1.0)
+            self.assertTrue(Path(finalize_data["path"]).is_file())
             gap = await client.call_tool(
                 "get_gap_analysis",
                 {"project_description": "Build a Python and FastAPI service with React."},
