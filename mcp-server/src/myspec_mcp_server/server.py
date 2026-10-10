@@ -12,11 +12,17 @@ from . import __version__
 from .profile import (
     MESSAGES,
     allocate_minutes,
+    build_profile,
     gap_analysis_payload,
     get_language,
     get_profile_path,
     load_profile,
     resource_text,
+    save_profile,
+)
+from .questions import (
+    CATEGORIES_METADATA,
+    get_question_pair,
 )
 
 logging.basicConfig(level=logging.WARNING)
@@ -108,6 +114,126 @@ def get_onboarding_plan(topic: str, minutes: int = 60) -> dict[str, Any]:
         "profile_context": resource_text(snapshot, "skills", language),
         "agenda": agenda,
         "profile_warning": messages["no_profile_warning"] if snapshot.status != "available" else None,
+    }
+
+
+@mcp.tool()
+def start_interview(language: str = "en") -> dict[str, Any]:
+    """Start an interactive MySpec Master Interview session.
+
+    Args:
+        language: Language code ("en" or "ar"). Defaults to "en" or MYSPEC_LANG env var.
+
+    Returns:
+        Structured payload containing initial turn metadata and Question Pair 0 (Q01, Q02).
+    """
+    lang = language or get_language()
+    try:
+        pair = get_question_pair(0, lang)
+    except Exception as exc:
+        return {"error": f"Failed to start interview: {exc}"}
+
+    cat_meta = CATEGORIES_METADATA.get(1, {})
+    cat_name = cat_meta.get("name_ar" if lang in {"ar", "ar-msa", "arabic"} else "name_en", "Identity & Work")
+
+    return {
+        "pair_index": 0,
+        "category_id": 1,
+        "category_name": cat_name,
+        "questions": [
+            {
+                "id": q["id"],
+                "title": q["title"],
+                "prompt": q["prompt"],
+            }
+            for q in pair
+        ],
+        "total_pairs": 25,
+        "total_questions": 50,
+        "status": "in_progress",
+    }
+
+
+@mcp.tool()
+def advance_interview(
+    pair_index: int,
+    answers_so_far: dict[str, str],
+    language: str = "en",
+) -> dict[str, Any]:
+    """Advance the interview to the next question pair or signal completion.
+
+    Args:
+        pair_index: The zero-based index of the completed turn (0 to 24).
+        answers_so_far: All question answers accumulated so far (keyed by "Q01", etc.).
+        language: Language code ("en" or "ar").
+
+    Returns:
+        Payload with the next question pair, or {status: "interview_complete", ready_to_finalize: True}.
+    """
+    if pair_index < 0:
+        return {"error": f"pair_index must be non-negative, got {pair_index}"}
+
+    if pair_index >= 24:
+        return {
+            "status": "interview_complete",
+            "ready_to_finalize": True,
+            "total_answered": len(answers_so_far),
+        }
+
+    next_index = pair_index + 1
+    lang = language or get_language()
+    try:
+        pair = get_question_pair(next_index, lang)
+    except Exception as exc:
+        return {"error": f"Failed to retrieve question pair {next_index}: {exc}"}
+
+    category_id = pair[0]["category_id"] if pair else 1
+    category_name = pair[0]["category_name"] if pair else ""
+
+    return {
+        "pair_index": next_index,
+        "category_id": category_id,
+        "category_name": category_name,
+        "questions": [
+            {
+                "id": q["id"],
+                "title": q["title"],
+                "prompt": q["prompt"],
+            }
+            for q in pair
+        ],
+        "total_pairs": 25,
+        "total_questions": 50,
+        "status": "in_progress",
+    }
+
+
+@mcp.tool()
+def finalize_interview(
+    answers: dict[str, str],
+    language: str = "en",
+) -> dict[str, Any]:
+    """Build and persist the final MySpec profile from accumulated interview answers.
+
+    Args:
+        answers: Complete dictionary of question answers (keyed by question ID).
+        language: Language code ("en" or "ar").
+
+    Returns:
+        Confirmation payload with saved path and completion rate.
+    """
+    lang = language or get_language()
+    current_snapshot = _load_current_profile()
+    existing_data = current_snapshot.data if current_snapshot.status == "available" else None
+
+    profile_data = build_profile(answers, existing_profile=existing_data, language=lang)
+    saved_path = save_profile(profile_data)
+
+    return {
+        "status": "saved",
+        "path": str(saved_path),
+        "completion_rate": profile_data["completion_rate"],
+        "profile_status": profile_data["status"],
     }
 
 
