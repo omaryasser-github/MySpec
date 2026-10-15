@@ -1,4 +1,4 @@
-# Phase 11.5: Profile Contract, Validation & Data Integrity
+# Phase 12: Profile Contract, Validation & Data Integrity
 
 > **Architectural Foundation & Source of Truth:**  
 > This phase extends the profile assembly and MCP interview workflow defined in [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md), [Phase 11.3](phase-11.3-refactor-mcp-tool-surface.md), and [Phase 11.4](phase-11.4-refactor-prompt-decoupling-and-e2e.md). The canonical profile contract in [`output/output_generation_prompt.md`](../../output/output_generation_prompt.md) is the current contract reference and must be reconciled with the executable model in this phase.
