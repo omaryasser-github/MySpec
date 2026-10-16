@@ -1,7 +1,9 @@
-# Phase 14: Question Bank Loading & Cache Reliability
+# Phase 12: Question Bank Loading, Cache Reliability & Prompt Integrity
 
 > **Architectural Foundation & Source of Truth:**
 > This phase strengthens the Markdown question-bank engine specified in [Phase 11.1](phase-11.1-refactor-question-bank-engine.md). The existing files under [`questions/EN`](../../questions/EN/) and [`questions/AR-MSA`](../../questions/AR-MSA/) remain the canonical question content. Parsed question records are validated before use or caching; this phase does not migrate the bank to another storage format.
+>
+> Executed as the foundational first phase in the 12–14 hardening cycle, this phase centralizes question metadata, canonical IDs (`Q01`–`Q50`), and category ranges to serve as the single source of truth for the Profile Contract in Phase 13.
 
 ---
 
@@ -18,7 +20,7 @@ Keep the local stdio server architecture and current Markdown authoring workflow
 * Phase 11.1 defines `MYSPEC_QUESTIONS_PATH`, the package-relative default, Markdown parsing, the 50 IDs (`Q01`–`Q50`), category ranges, and process caching.
 * Phase 11.0 identifies the English and Arabic Markdown files as the canonical question content.
 * The current implementation caches by language only and can overwrite duplicate IDs or omit incomplete blocks without rejecting the whole bank. This phase closes those reliability gaps.
-* Use the repository's existing Python support and `unittest` conventions. Phase 12 is planned to establish the profile Pydantic contract, but it does not automatically validate question-bank records.
+* Use the repository's existing Python support and `unittest` conventions. Phase 13 will establish the profile Pydantic contract, building upon the question-bank metadata and canonical IDs established here.
 * Before implementation, confirm Pydantic is declared directly in `mcp-server/pyproject.toml` if `questions.py` imports it. Do not rely on an undeclared transitive dependency. Do not add runtime dependencies solely for JSON Schema validation.
 
 ---
@@ -26,7 +28,8 @@ Keep the local stdio server architecture and current Markdown authoring workflow
 ## 3. Scope & Target Files
 
 * **Modify**: `mcp-server/src/myspec_mcp_server/questions.py` (path-sensitive cache, strict parser behavior, full-bank validation, actionable loader errors)
-* **Modify**: `mcp-server/tests/test_questions.py` (isolated path, parser, validation, cache, and parity failure coverage)
+* **Modify**: `prompts/master-interview-standalone.md` (repair corrupted MCP tool names in line 6: `advance_interview`, `finalize_interview`)
+* **Modify**: `mcp-server/tests/test_questions.py` and/or `test_server.py` (isolated path, parser, validation, cache, parity failure coverage, and prompt tool name integrity test)
 * **Modify**: `docs/phases/phase-11.1-refactor-question-bank-engine.md` (reconcile cache and validation requirements with the completed behavior)
 * **Review/update if needed**: `docs/master_interview_architecture.md` and `mcp-server/README.md` (keep bank path, Markdown source-of-truth, cache lifetime, and failure behavior accurate)
 
@@ -115,12 +118,14 @@ Error messages should name the resolved file and include the question ID or sour
 3. Test cache separation when `MYSPEC_QUESTIONS_PATH` changes between roots in a single process, and verify invalid banks are not cached.
 4. Test English/Arabic ID parity and first/last question-pair boundaries.
 5. Test that consumers cannot mutate cached data in a way that changes later results.
-6. Update Phase 11.1 and relevant setup/architecture docs to describe the final source format, path resolution, process cache, validation, and restart-to-refresh behavior.
+6. Add prompt tool name integrity test verifying that tool references in `prompts/*.md` exactly match registered MCP tool names (catching corrupted names such as `\x07dvance_interview`).
+7. Update Phase 11.1 and relevant setup/architecture docs to describe the final source format, path resolution, process cache, validation, and restart-to-refresh behavior.
 
 #### Stage 3 Acceptance Criteria
 
 * Tests cover both successful loading and each required failure mode through public loader entry points.
 * Cache tests fail if the cache is keyed only by language or if invalid results are cached.
+* Prompt integrity tests verify all tool names in prompt files match MCP registry without escape character corruption.
 * Existing interview question ordering and pair behavior remain covered.
 * Documentation consistently describes Markdown as the canonical bank format and does not promise silent recovery or hot reload.
 
@@ -141,14 +146,14 @@ Error messages should name the resolved file and include the question ID or sour
 
 ## 7. Future Work — Nearest Follow-Ups
 
-These items are deliberately deferred so Phase 14 can close the current loading and cache reliability issue without expanding into content migration or broader interview redesign. After Phase 14 is implemented and its tests pass, review these in order and create a separate phase only when the need is confirmed:
+These items are deliberately deferred so Phase 12 can close the current loading and cache reliability issue without expanding into content migration or broader interview redesign. After Phase 12 is implemented and its tests pass, review these in order and create a separate phase only when the need is confirmed:
 
 1. **Question-bank format decision:** Assess whether Markdown remains the best canonical authoring format or whether a future JSON migration would materially improve editing, tooling, or distribution. If a migration is chosen, define a one-time conversion, review every translated question, preserve stable IDs, and update the standalone prompt/docs together. Do not maintain two editable sources of truth.
 2. **Live reload decision:** Measure startup/load behavior and gather an explicit need for same-process bank edits before designing cache invalidation. If required, specify a simple safe refresh boundary and tests rather than adding a watcher preemptively.
 3. **Translation quality workflow:** Consider a separate content-quality review for English/Arabic semantic parity. ID parity verifies structure, not translation accuracy; that requires human review or a dedicated editorial workflow.
-4. **Remaining MCP reliability issues:** Once the question bank is stable, prioritize the still-open high-impact server issues from the project review, beginning with duplicated profile mapping and uncovered interview tool failure cases, while keeping each phase independently scoped.
+4. **Remaining MCP reliability issues:** Once the question bank is stable, proceed to Phase 13 (Profile Contract & Answer Validation) and Phase 14 (Persistence Consistency).
 
-No future item above is required to complete Phase 14.
+No future item above is required to complete Phase 12.
 
 ---
 

@@ -1,7 +1,7 @@
-# Phase 12: Profile Contract, Validation & Data Integrity
+# Phase 13: Profile Contract, Validation & Data Integrity
 
 > **Architectural Foundation & Source of Truth:**  
-> This phase extends the profile assembly and MCP interview workflow defined in [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md), [Phase 11.3](phase-11.3-refactor-mcp-tool-surface.md), and [Phase 11.4](phase-11.4-refactor-prompt-decoupling-and-e2e.md). The canonical profile contract in [`output/output_generation_prompt.md`](../../output/output_generation_prompt.md) is the current contract reference and must be reconciled with the executable model in this phase.
+> This phase extends the profile assembly and MCP interview workflow defined in [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md), [Phase 11.3](phase-11.3-refactor-mcp-tool-surface.md), [Phase 11.4](phase-11.4-refactor-prompt-decoupling-and-e2e.md), and [Phase 12](phase-12-question-bank-loading-and-cache-reliability.md). The canonical question bank contracts, IDs, and category mappings validated in Phase 12 are the direct foundation for answer validation and profile assembly in this phase. The canonical profile contract in [`output/output_generation_prompt.md`](../../output/output_generation_prompt.md) is reconciled with the executable model here.
 
 ---
 
@@ -15,9 +15,9 @@ The interview host supplies structured answers to `finalize_interview`; the MCP 
 
 ## 2. Dependencies
 
-Complete and review the contracts introduced by Phases 11.1 through 11.4 before implementation. In particular:
+Complete and review the contracts introduced by Phase 12 and Phases 11.1 through 11.4 before implementation. In particular:
 
-* Phase 11.1 defines the canonical question IDs and language-specific question bank.
+* Phase 12 defines the centralized canonical question IDs (`Q01`–`Q50`), category mappings, and validated bank cache.
 * Phase 11.2 defines `build_profile` and profile persistence.
 * Phase 11.3 defines the interview tool inputs, progression, and completion behavior.
 * Phase 11.4 defines the prompt and end-to-end workflow boundaries.
@@ -28,14 +28,14 @@ Resolve any inconsistencies between those phase specifications and `output/outpu
 
 ## 3. Scope & Target Files
 
-* **Modify**: `mcp-server/src/myspec_mcp_server/profile.py` (canonical model, validation helpers, and validation gates)
-* **Modify**: `mcp-server/src/myspec_mcp_server/server.py` (answer validation and actionable MCP tool failures)
+* **Modify**: `mcp-server/src/myspec_mcp_server/profile.py` (canonical model, validation helpers, module dict key conventions, `extract_skills` alignment, and validation gates)
+* **Modify**: `mcp-server/src/myspec_mcp_server/server.py` (tool signatures defaulting `language: str | None = None`, `finalize_interview(output_preference=...)`, answer validation, and actionable MCP tool failures)
 * **Modify**: `mcp-server/pyproject.toml` (declare the selected Pydantic v2 dependency if it is not already available through the supported MCP SDK dependency contract)
 * **Modify**: `output/output_generation_prompt.md` (align the documented profile schema and generation instructions with the canonical model)
 * **Modify**: `docs/phases/phase-11.2-refactor-profile-assembly-and-persistence.md` and related phase documentation as needed to remove conflicting profile field and persistence requirements
-* **Modify**: `mcp-server/tests/test_profile.py`, `mcp-server/tests/test_server.py`, and relevant question-bank tests (contract and failure-path coverage)
+* **Modify**: `mcp-server/tests/test_profile.py`, `mcp-server/tests/test_server.py`, and relevant question-bank tests (contract, MCP error assertions, and failure-path coverage)
 
-Do not modify question text or implement unrelated interview, caching, or prompt-decoupling work in this phase.
+Do not modify question text or implement unrelated question caching or prompt-decoupling work in this phase.
 
 ---
 
@@ -53,11 +53,11 @@ Reconcile the model with the existing profile contract and specify each field's 
 * `completed_at`: timezone-aware timestamp serialized as ISO 8601.
 * `status`: supported lifecycle enum, including the defined complete and partial states; retain `stale` only if existing profile requirements still use it.
 * `completion_rate`: numeric value from 0.0 through 1.0 with a defined calculation over the canonical 50 question IDs.
-* `output_preference`: enum of `bilingual`, `english_only`, `arabic_only`, or `none`.
+* `output_preference`: enum of `bilingual`, `english_only`, `arabic_only`, or `none`. Add `output_preference: str = "english_only"` to `finalize_interview` tool parameters and propagate to `build_profile`.
 * `skipped_fields`: unique question IDs with explicitly defined meanings for declined, unknown, not-applicable, unanswered, and unresolved clarification states.
-* `language`: decide whether it is canonical persisted profile metadata or interview/session metadata. If persisted, define its supported enum and update all contracts; otherwise do not add it to the profile object.
+* `language`: normalize tool parameters across `start_interview`, `advance_interview`, and `finalize_interview` to default to `language: str | None = None` so that an omitted language explicitly evaluates `get_language()` / `MYSPEC_LANG`. Decide whether `language` is canonical persisted profile metadata or session metadata.
 * `updated_at`: decide whether it is part of the canonical contract or whether `completed_at` alone records profile completion/update time. Do not keep both fields with unclear or conflicting semantics.
-* Seven dynamic modules: `identity`, `current_skills`, `learning_in_progress`, `limitations`, `communication_prefs`, `work_context`, and `growth_goals`. Define the permitted JSON-compatible values and dynamic keys while keeping the profile's top-level properties closed.
+* Seven dynamic modules: `identity`, `current_skills`, `learning_in_progress`, `limitations`, `communication_prefs`, `work_context`, and `growth_goals`. Clarify module dict key conventions: store question IDs (`Q01`..`Q50`) deterministically as keys in the dynamic module dicts, and align `extract_skills()` in `profile.py` so that tools in `work_context` are extracted from question values/text rather than requiring dictionary keys to match substring `"tool"`.
 
 Define cross-field invariants for status, completion rate, and dispositions. A fully resolved interview may be complete; a permitted partial interview must remain explicitly partial, with unresolved or declined IDs represented consistently. An unprovided answer must not be silently counted as resolved.
 
@@ -97,6 +97,7 @@ Apply validation at each data boundary before data can be treated as canonical o
 #### 4.6 Return Actionable MCP Tool Errors
 
 * Use the installed Python MCP SDK's supported tool-error mechanism so expected validation failures reach the host as a tool result with `isError: true` and readable text.
+* Update existing tests in `test_server.py` that previously asserted dictionary keys `{"error": ...}` to assert against SDK `isError: true` tool results.
 * Include a concise failure reason, the relevant field or question ID, the expected value/shape, and a correction hint when useful. Avoid returning raw tracebacks or sensitive profile contents.
 * Do not return an ordinary successful dictionary containing an `error` key for a failed tool call.
 * If a tool advertises an output schema, keep successful `structuredContent` within that schema. Do not attach invalid profile data as structured output on an error result.

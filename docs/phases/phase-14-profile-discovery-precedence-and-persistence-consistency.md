@@ -1,7 +1,7 @@
-# Phase 13: Profile Discovery, Precedence & Persistence Consistency
+# Phase 14: Profile Discovery, Precedence & Persistence Consistency
 
 > **Architectural Foundation & Source of Truth:**
-> This phase resolves the profile location and persistence contract built on by [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md) and [Phase 12](phase-12-profile-validation-and-contracts.md). Phase 12's Pydantic model is the authoritative profile data contract. This phase defines which canonical file is read and written, how local configuration selects that file, and how a legacy Markdown profile is migrated once without runtime dual-format reads.
+> This phase resolves the profile location and persistence contract built on by [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md) and [Phase 13](phase-13-profile-validation-and-contracts.md). Phase 13's Pydantic model is the authoritative profile data contract. This phase defines which canonical file is read and written, how local configuration selects that file, and how a legacy Markdown profile is migrated once without runtime dual-format reads.
 
 ---
 
@@ -9,7 +9,7 @@
 
 Make `profile.json` the single canonical profile source for every MCP resource, tool, prompt, and profile update. A successful save must update the same file that the next profile read uses, regardless of the process working directory or which supported configuration source selected the profile path.
 
-Define deterministic path precedence, provide a deliberate one-time migration path for existing `profile.md` data, validate profiles with the Phase 12 Pydantic model, and write canonical JSON safely using an atomic same-directory replacement.
+Define deterministic path precedence, provide a deliberate one-time migration path for existing `profile.md` data, validate profiles with the Phase 13 Pydantic model, and write canonical JSON safely using an atomic same-directory replacement.
 
 The MCP server remains a single-user, local-only stdio process. This phase adds no database, remote service, telemetry, or general-purpose storage framework.
 
@@ -17,12 +17,12 @@ The MCP server remains a single-user, local-only stdio process. This phase adds 
 
 ## 2. Dependencies
 
-Complete Phase 12 before implementing this phase. Phase 12 establishes the canonical model, supported schema version, profile validation rules, and invalid-profile behavior that migration and persistence must use.
+Complete Phase 13 before implementing this phase. Phase 13 establishes the canonical model, supported schema version, profile validation rules, and invalid-profile behavior that migration and persistence must use.
 
 Review and reconcile the existing contracts in:
 
 * [Phase 11.2](phase-11.2-refactor-profile-assembly-and-persistence.md), which currently says that a `.md` profile path writes to a sibling `profile.json`.
-* [Phase 12](phase-12-profile-validation-and-contracts.md), which currently preserves Markdown compatibility on reads.
+* [Phase 13](phase-13-profile-validation-and-contracts.md), which currently preserves Markdown compatibility on reads.
 * [`output/output_generation_prompt.md`](../../output/output_generation_prompt.md), which defines canonical JSON and Markdown companion artifacts.
 * [`mcp-server/README.md`](../../mcp-server/README.md), [`README.md`](../../README.md), and [`docs/how-it-works.md`](../how-it-works.md), which currently describe Markdown-first or dual-format discovery.
 * [Phase 8](phase-08-local-mcp-server.md), [Phase 9.1](phase-09.1-core-architecture-and-contract-fixes.md), and [Phase 10](phase-10-documentation-and-visual-architecture.md), which contain older default-path and fallback rules.
@@ -35,7 +35,7 @@ Update those contracts as part of implementation so none continue to promise Mar
 
 ### 3.1 Canonical File
 
-* The canonical profile is JSON and must validate against the Phase 12 Pydantic model before it is returned or persisted.
+* The canonical profile is JSON and must validate against the Phase 13 Pydantic model before it is returned or persisted.
 * The default canonical path is `~/.myspec/profile.json`.
 * `profile.md` may remain as a human-readable generated companion or as a preserved legacy migration source. The MCP server does not load it as profile context after this phase.
 * Do not write both formats as independently authoritative profiles. If a Markdown companion is emitted, it is a derived export from canonical JSON and is never read back by MCP resources, tools, or prompts.
@@ -69,7 +69,7 @@ The migration operation must:
 2. Select the legacy Markdown source explicitly, defaulting only when the migration operation documents a known legacy location such as `~/.myspec/profile.md`.
 3. Refuse to overwrite an existing canonical JSON profile. Migration is not a profile merge or update operation.
 4. Parse the supported legacy Markdown shape with a deterministic converter. Do not use a generic Markdown-to-dictionary conversion as proof that content maps correctly to profile semantics.
-5. Validate the complete converted profile with the Phase 12 Pydantic model before writing.
+5. Validate the complete converted profile with the Phase 13 Pydantic model before writing.
 6. Preserve the original Markdown file. Create a recoverable archive copy as part of a successful migration; never delete or move the source automatically.
 7. Persist the validated JSON atomically. Report the source, destination, and outcome without exposing profile contents.
 8. On parse, validation, archive, or write failure, report an actionable error and leave the original source unchanged. Do not report success or produce a partially written canonical profile.
@@ -82,13 +82,13 @@ After migration, ordinary server execution reads only the resolved JSON file. If
 
 * **Modify**: `mcp-server/src/myspec_mcp_server/profile.py` (path resolution, JSON-only profile reads, migration conversion, validation, and canonical persistence)
 * **Modify**: `mcp-server/src/myspec_mcp_server/server.py` and/or a focused CLI module (profile path option and explicit migration entry point, while preserving stdio server launch behavior)
-* **Modify**: `mcp-server/pyproject.toml` (CLI entry points or config dependencies only if the selected implementation requires them; reuse Phase 12's Pydantic dependency)
+* **Modify**: `mcp-server/pyproject.toml` (CLI entry points or config dependencies only if the selected implementation requires them; reuse Phase 13's Pydantic dependency)
 * **Modify**: `mcp-server/README.md`, `README.md`, and `docs/how-it-works.md` (canonical location, precedence, migration instructions, and host configuration)
 * **Modify**: `output/output_generation_prompt.md` (JSON as canonical artifact; Markdown is a derived companion, never a runtime source)
-* **Modify**: `docs/phases/phase-08-local-mcp-server.md`, `phase-09.1-core-architecture-and-contract-fixes.md`, `phase-10-documentation-and-visual-architecture.md`, `phase-11.2-refactor-profile-assembly-and-persistence.md`, and `phase-12-profile-validation-and-contracts.md` (remove obsolete discovery and fallback requirements)
+* **Modify**: `docs/phases/phase-08-local-mcp-server.md`, `phase-09.1-core-architecture-and-contract-fixes.md`, `phase-10-documentation-and-visual-architecture.md`, `phase-11.2-refactor-profile-assembly-and-persistence.md`, and `phase-13-profile-validation-and-contracts.md` (remove obsolete discovery and fallback requirements)
 * **Modify**: `mcp-server/tests/test_profile.py`, `mcp-server/tests/test_server.py`, and focused migration/configuration tests (path precedence, canonical read-after-write, and migration behavior)
 
-Do not change the profile schema established by Phase 12, question-bank behavior, interview answer rules, or unrelated MCP resources and tools.
+Do not change the profile schema established by Phase 13, question-bank behavior, interview answer rules, or unrelated MCP resources and tools.
 
 ---
 
@@ -116,7 +116,7 @@ Do not change the profile schema established by Phase 12, question-bank behavior
 1. Implement the shared path resolver with the defined precedence. Invalid explicit higher-priority settings must return an actionable error rather than silently selecting a lower-priority path.
 2. Make every MCP resource, tool, prompt, and profile update read the resolved canonical JSON file only.
 3. Keep missing, unreadable, malformed, and unsupported-version profile states explicit and compatible with the existing graceful MCP responses.
-4. Validate profile data with the Phase 12 Pydantic model before serialization and before every save.
+4. Validate profile data with the Phase 13 Pydantic model before serialization and before every save.
 5. Write JSON to a temporary file in the destination directory, flush and `fsync` the file, then replace the destination with `os.replace`. Clean up the temporary file on failure and preserve any existing valid destination until replacement succeeds.
 6. Implement the explicit migration operation: refuse destination overwrite, parse only supported Markdown, validate before persistence, preserve the source, archive it, and write canonical JSON atomically. Return success only after the JSON can be read and validated at the selected path.
 7. Do not introduce SQLite, a storage abstraction framework, a database, remote persistence, or general backup/recovery behavior.
@@ -164,7 +164,7 @@ Add unit, CLI/config, migration, and MCP-surface tests. The tests must demonstra
 * Profile merging, profile conflict resolution, concurrent editing, or multi-user storage.
 * SQLite, database infrastructure, network services, telemetry, authentication, or cloud synchronization.
 * General-purpose backup rotation, automatic restore, or recovery systems beyond preserving the legacy source and its migration archive.
-* Changes to the Phase 12 profile schema or question-bank, interview-state, and language-default issues unrelated to profile path selection.
+* Changes to the Phase 13 profile schema or question-bank, interview-state, and language-default issues unrelated to profile path selection.
 
 ---
 
@@ -173,7 +173,7 @@ Add unit, CLI/config, migration, and MCP-surface tests. The tests must demonstra
 * [ ] `profile.json` is the sole canonical runtime profile and default location.
 * [ ] All profile consumers use one resolver with CLI → `MYSPEC_PROFILE_PATH` → MySpec config → default precedence.
 * [ ] `profile.md` is never loaded by normal server operation; legacy conversion is explicit, validated, and repeat-safe.
-* [ ] Pydantic validation gates reads, migration output, and persistence using the Phase 12 model.
+* [ ] Pydantic validation gates reads, migration output, and persistence using the Phase 13 model.
 * [ ] Atomic writes use a same-directory temporary file and `os.replace`, preserving a prior valid destination on failure.
 * [ ] Saving a canonical profile and reading it through every MCP surface returns the same updated data.
 * [ ] All path, migration, failure, read-after-write, and documentation tests pass.

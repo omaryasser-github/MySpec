@@ -3,7 +3,7 @@
 > **Web Chat / Zero-MCP Distribution Notice:**  
 > This file is the self-contained, monolithic distribution of the MySpec Master Interview. It contains the complete embedded <QUESTIONS_BANK> (Q01–Q50) for direct copy-paste execution into web LLM interfaces (ChatGPT, Claude Web, Gemini Web) without requiring local filesystem access or an MCP server.
 >
-> If you are using an AI IDE or desktop host connected to the MySpec Local MCP Server (Cursor, Claude Desktop), use prompts/master-interview.md and the MCP tools (start_interview, dvance_interview, inalize_interview) instead.
+> If you are using an AI IDE or desktop host connected to the MySpec Local MCP Server (Cursor, Claude Desktop), use prompts/master-interview.md and the MCP tools (start_interview, advance_interview, finalize_interview) instead.
 
 ---
 
