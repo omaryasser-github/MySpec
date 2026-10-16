@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import sys
@@ -64,13 +64,17 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-            # Test start_interview tool
-            start = await client.call_tool("start_interview", {"language": "en"})
+            # Test start_interview tool (language=None uses MYSPEC_LANG)
+            start = await client.call_tool("start_interview", {})
             start_data = start.structured_content
             self.assertEqual(start_data["pair_index"], 0)
             self.assertEqual(start_data["status"], "in_progress")
             self.assertEqual([q["id"] for q in start_data["questions"]], ["Q01", "Q02"])
             self.assertEqual(start_data["category_name"], "Identity & Work")
+
+            # Explicit language still works
+            start_explicit = await client.call_tool("start_interview", {"language": "en"})
+            self.assertEqual(start_explicit.structured_content["pair_index"], 0)
 
             # Test advance_interview tool
             advance = await client.call_tool(
@@ -78,20 +82,19 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "pair_index": 0,
                     "answers_so_far": {"Q01": "Software Engineer", "Q02": "Tech"},
-                    "language": "en",
                 },
             )
             advance_data = advance.structured_content
             self.assertEqual(advance_data["pair_index"], 1)
             self.assertEqual([q["id"] for q in advance_data["questions"]], ["Q03", "Q04"])
 
-            # Test advance_interview completion boundary
+            # Test advance_interview completion boundary (pair 24 requires Q49+Q50 answered)
+            all_answers = {f"Q{i:02d}": f"Answer {i}" for i in range(1, 51)}
             complete = await client.call_tool(
                 "advance_interview",
                 {
                     "pair_index": 24,
-                    "answers_so_far": {"Q01": "Answer"},
-                    "language": "en",
+                    "answers_so_far": all_answers,
                 },
             )
             self.assertEqual(complete.structured_content["status"], "interview_complete")
@@ -99,11 +102,15 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
 
             # Test finalize_interview tool
             mock_answers = {f"Q{i:02d}": f"Mock answer {i}" for i in range(1, 51)}
-            finalize = await client.call_tool("finalize_interview", {"answers": mock_answers, "language": "en"})
+            finalize = await client.call_tool(
+                "finalize_interview",
+                {"answers": mock_answers, "language": "en", "output_preference": "english_only"},
+            )
             finalize_data = finalize.structured_content
             self.assertEqual(finalize_data["status"], "saved")
             self.assertEqual(finalize_data["completion_rate"], 1.0)
             self.assertTrue(Path(finalize_data["path"]).is_file())
+
             gap = await client.call_tool(
                 "get_gap_analysis",
                 {"project_description": "Build a Python and FastAPI service with React."},
@@ -146,17 +153,77 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
             result = await client.read_resource("myprofile://summary")
             self.assertIn("Python", result.contents[0].text)
 
-    async def test_tools_return_graceful_results_for_missing_and_invalid_inputs(self) -> None:
+    async def test_tools_return_is_error_for_invalid_inputs(self) -> None:
+        """Validation failures must surface as isError=True tool results, not {"error": ...} dicts."""
         self.profile_path.unlink()
         async with Client(mcp) as client:
+            # get_gap_analysis: missing profile returns structured data (not an error)
             gap = await client.call_tool("get_gap_analysis", {"project_description": "Build a Python app."})
+            self.assertFalse(gap.is_error)
             self.assertEqual(gap.structured_content["profile_status"], "missing")
             self.assertIsNotNone(gap.structured_content["profile_warning"])
 
+            # get_gap_analysis: empty description is a ToolError -> isError=True
+            empty_gap = await client.call_tool("get_gap_analysis", {"project_description": "  "})
+            self.assertTrue(empty_gap.is_error)
+
+            # get_onboarding_plan: empty topic is a ToolError
             empty_topic = await client.call_tool("get_onboarding_plan", {"topic": "  "})
-            self.assertIn("error", empty_topic.structured_content)
+            self.assertTrue(empty_topic.is_error)
+
+            # get_onboarding_plan: out-of-range minutes is a ToolError
             too_short = await client.call_tool("get_onboarding_plan", {"topic": "Python", "minutes": 4})
-            self.assertIn("error", too_short.structured_content)
+            self.assertTrue(too_short.is_error)
+
+    async def test_advance_interview_rejects_unanswered_pair(self) -> None:
+        """advance_interview must return isError=True when the current pair lacks answers."""
+        async with Client(mcp) as client:
+            # Pair 0 requires Q01 and Q02; supply only Q01
+            result = await client.call_tool(
+                "advance_interview",
+                {
+                    "pair_index": 0,
+                    "answers_so_far": {"Q01": "Software Engineer"},
+                },
+            )
+            self.assertTrue(result.is_error)
+            error_text = result.content[0].text
+            self.assertIn("Q02", error_text)
+
+    async def test_advance_interview_accepts_disposition_sentinels(self) -> None:
+        """Disposition sentinels count as explicit answers for the pair-advance gate."""
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "advance_interview",
+                {
+                    "pair_index": 0,
+                    "answers_so_far": {"Q01": "Software Engineer", "Q02": "__SKIPPED__"},
+                },
+            )
+            self.assertFalse(result.is_error)
+            self.assertEqual(result.structured_content["pair_index"], 1)
+
+    async def test_finalize_interview_rejects_unknown_question_ids(self) -> None:
+        """finalize_interview must return isError=True for answers with invalid question IDs."""
+        async with Client(mcp) as client:
+            bad_answers = {"Q99": "invalid", "Q01": "valid answer"}
+            result = await client.call_tool("finalize_interview", {"answers": bad_answers})
+            self.assertTrue(result.is_error)
+            self.assertIn("Q99", result.content[0].text)
+
+    async def test_finalize_interview_output_preference_is_persisted(self) -> None:
+        """output_preference supplied to finalize_interview should be stored in the saved profile."""
+        async with Client(mcp) as client:
+            answers = {f"Q{i:02d}": f"Answer {i}" for i in range(1, 51)}
+            result = await client.call_tool(
+                "finalize_interview",
+                {"answers": answers, "output_preference": "bilingual"},
+            )
+            self.assertFalse(result.is_error)
+            saved_path = Path(result.structured_content["path"])
+            import json
+            saved_data = json.loads(saved_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved_data["output_preference"], "bilingual")
 
 
 if __name__ == "__main__":

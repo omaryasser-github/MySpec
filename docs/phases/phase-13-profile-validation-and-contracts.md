@@ -161,10 +161,10 @@ Add unit and MCP-surface tests for successful validation, every contract boundar
 
 ## 6. Definition of Done
 
-* [ ] The canonical profile model is strict, versioned, and generates the JSON Schema used by the project.
-* [ ] The output-generation prompt and dependent phase documentation match the canonical model.
-* [ ] Answer intake, profile assembly, profile reads, and persistence enforce the specified validation boundaries.
-* [ ] Validation errors use the MCP SDK-supported tool-error path and explain how to correct the input.
-* [ ] No invalid profile is saved or presented as successfully finalized.
-* [ ] All required tests pass, including MCP-level error and write-failure tests.
-* [ ] The local-only stdio architecture and documented Markdown compatibility remain intact.
+* [x] The canonical profile model is strict, versioned, and generates the JSON Schema used by the project.
+* [x] The output-generation prompt and dependent phase documentation match the canonical model.
+* [x] Answer intake, profile assembly, profile reads, and persistence enforce the specified validation boundaries.
+* [x] Validation errors use the MCP SDK-supported tool-error path and explain how to correct the input.
+* [x] No invalid profile is saved or presented as successfully finalized.
+* [x] All required tests pass, including MCP-level error and write-failure tests.
+* [x] The local-only stdio architecture and documented Markdown compatibility remain intact.

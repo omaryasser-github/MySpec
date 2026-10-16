@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 from myspec_mcp_server.profile import (
+    MySpecProfile,
+    ProfileValidationError,
     allocate_minutes,
     build_profile,
     find_technology_terms,
@@ -15,7 +18,32 @@ from myspec_mcp_server.profile import (
     load_profile,
     resource_text,
     save_profile,
+    validate_answers,
+    validate_pair_answers,
+    validate_profile_dict,
 )
+
+
+def _valid_profile_dict(**overrides) -> dict:
+    """Return a minimal complete valid profile dict, merging any overrides."""
+    base = {
+        "schema_version": 1,
+        "completed_at": "2024-06-01T12:00:00+00:00",
+        "status": "partial",
+        "completion_rate": 0.0,
+        "output_preference": "english_only",
+        "language": "en",
+        "skipped_fields": [],
+        "identity": {},
+        "current_skills": {},
+        "learning_in_progress": {},
+        "limitations": {},
+        "communication_prefs": {},
+        "work_context": {},
+        "growth_goals": {},
+    }
+    base.update(overrides)
+    return base
 
 
 class ProfileLoadingTests(unittest.TestCase):
@@ -110,12 +138,10 @@ class ProfileLoadingTests(unittest.TestCase):
         self.assertEqual(terms, ["postgresql", "fastapi", "react"])
 
     def test_technology_terms_avoids_substring_collisions(self) -> None:
-        # "React Native" should only match "react native", not "react"
         terms_single = find_technology_terms("Build a modern mobile app with React Native and PostgreSQL.")
         self.assertEqual(terms_single, ["react native", "postgresql"])
         self.assertNotIn("react", terms_single)
 
-        # If both are independently mentioned, both should match
         terms_both = find_technology_terms("We use React Native for mobile and React for the web portal.")
         self.assertIn("react native", terms_both)
         self.assertIn("react", terms_both)
@@ -138,16 +164,13 @@ class ProfileLoadingTests(unittest.TestCase):
 
         self.assertEqual(snapshot.status, "available")
         skills_text = resource_text(snapshot, "skills")
-        # Ensure code comment was NOT treated as a separate section header
         self.assertIn("# Configure database connection", skills_text)
         self.assertIn("Python: proficient", skills_text)
 
-        # Communication section is preserved intact
         pref_text = resource_text(snapshot, "preferences")
         self.assertIn("Direct and concise", pref_text)
 
     def test_allocate_minutes_lower_bound_safety(self) -> None:
-        # Sessions below 5 minutes should clamp safely to 5 minutes
         for invalid_total in (4, 1, 0, -10):
             allocated = allocate_minutes(invalid_total)
             self.assertEqual(sum(allocated), 5)
@@ -161,22 +184,17 @@ class ProfileLoadingTests(unittest.TestCase):
         self.assertEqual(profile["completion_rate"], 1.0)
         self.assertEqual(profile["language"], "en")
         self.assertEqual(profile["skipped_fields"], [])
+        self.assertIn("completed_at", profile)
+        self.assertNotIn("updated_at", profile)
 
-        # Verify all 7 module dictionaries are populated
         for module in (
-            "identity",
-            "work_context",
-            "communication_prefs",
-            "current_skills",
-            "learning_in_progress",
-            "limitations",
-            "growth_goals",
+            "identity", "work_context", "communication_prefs",
+            "current_skills", "learning_in_progress", "limitations", "growth_goals",
         ):
             self.assertIn(module, profile)
             self.assertIsInstance(profile[module], dict)
             self.assertTrue(len(profile[module]) > 0)
 
-        # Check module membership mapping
         self.assertEqual(profile["identity"]["Q01"], "Detailed answer for question 1")
         self.assertEqual(profile["communication_prefs"]["Q11"], "Detailed answer for question 11")
         self.assertEqual(profile["growth_goals"]["Q39"], "Detailed answer for question 39")
@@ -188,7 +206,6 @@ class ProfileLoadingTests(unittest.TestCase):
         answers["Q20"] = "__SKIPPED__"
         answers["Q22"] = "__SKIPPED__"
         answers["Q25"] = "__SKIPPED__"
-        # 25 total supplied, 5 skipped -> 20 answered out of 50 -> 0.4 completion rate
         profile = build_profile(answers, language="en")
 
         self.assertEqual(profile["status"], "partial")
@@ -206,20 +223,27 @@ class ProfileLoadingTests(unittest.TestCase):
         self.assertEqual(merged["identity"]["Q02"], "Initial industry")
         self.assertEqual(merged["identity"]["Q03"], "New experience")
 
+    def test_build_profile_output_preference(self) -> None:
+        answers = {"Q01": "Test"}
+        for pref in ("bilingual", "english_only", "arabic_only", "none"):
+            p = build_profile(answers, output_preference=pref)
+            self.assertEqual(p["output_preference"], pref)
+        # Unknown pref falls back to english_only
+        p_fallback = build_profile(answers, output_preference="invalid_pref")
+        self.assertEqual(p_fallback["output_preference"], "english_only")
+
     def test_save_profile_atomic_and_dir_creation(self) -> None:
         target_dir = self.root / "nested" / "deep"
         target_file = target_dir / "profile.json"
-        data = {"schema_version": 1, "status": "complete", "completion_rate": 1.0}
+        data = build_profile({f"Q{i:02d}": f"A{i}" for i in range(1, 51)})
 
         saved_path = save_profile(data, target_file)
         self.assertEqual(saved_path, target_file.resolve())
         self.assertTrue(saved_path.is_file())
 
-        # Verify .tmp file was cleaned up by atomic rename
         tmp_file = saved_path.with_suffix(".json.tmp")
         self.assertFalse(tmp_file.exists())
 
-        # Verify contents
         loaded = json.loads(saved_path.read_text(encoding="utf-8"))
         self.assertEqual(loaded["status"], "complete")
 
@@ -235,6 +259,141 @@ class ProfileLoadingTests(unittest.TestCase):
         self.assertEqual(snapshot.format, "json")
         self.assertIsNotNone(snapshot.data)
         self.assertEqual(snapshot.data.get("completion_rate"), 1.0)
+
+    def test_save_profile_rejects_invalid_data(self) -> None:
+        """save_profile must not write anything when data fails canonical validation."""
+        target_file = self.root / "bad_profile.json"
+        # An extra undocumented field violates extra="forbid"
+        invalid_data = _valid_profile_dict(undocumented_extra_field="should_fail")
+        with self.assertRaises(ProfileValidationError):
+            save_profile(invalid_data, target_file)
+        # File must NOT have been created.
+        self.assertFalse(target_file.exists())
+
+    def test_load_profile_rejects_unsupported_schema_version(self) -> None:
+        profile_file = self.root / "old_version.json"
+        profile_file.write_text(
+            json.dumps({"schema_version": 99, "status": "complete"}),
+            encoding="utf-8",
+        )
+        snapshot = load_profile(profile_file)
+        self.assertEqual(snapshot.status, "malformed")
+        self.assertIn("unsupported schema_version", snapshot.detail)
+
+
+class MySpecProfileModelTests(unittest.TestCase):
+    """Unit tests for the canonical profile Pydantic model contract."""
+
+    def test_valid_complete_profile_validates_successfully(self) -> None:
+        data = _valid_profile_dict(status="complete", completion_rate=1.0)
+        model = validate_profile_dict(data)
+        self.assertEqual(model.status, "complete")
+        self.assertEqual(model.completion_rate, 1.0)
+        self.assertEqual(model.output_preference, "english_only")
+
+    def test_valid_partial_profile_validates_successfully(self) -> None:
+        data = _valid_profile_dict(status="partial", completion_rate=0.5, skipped_fields=["Q01"])
+        model = validate_profile_dict(data)
+        self.assertEqual(model.status, "partial")
+        self.assertIn("Q01", model.skipped_fields)
+
+    def test_invalid_field_type_fails_with_details(self) -> None:
+        # schema_version must be an int; pass a string to trigger a type error
+        data = _valid_profile_dict(schema_version="not_an_int")
+        with self.assertRaises(ProfileValidationError) as ctx:
+            validate_profile_dict(data)
+        self.assertIn("Profile validation failed", str(ctx.exception))
+        self.assertIn("schema_version", str(ctx.exception))
+
+    def test_extra_top_level_fields_are_rejected(self) -> None:
+        data = _valid_profile_dict(undocumented_field="oops")
+        with self.assertRaises(ProfileValidationError) as ctx:
+            validate_profile_dict(data)
+        self.assertIn("undocumented_field", str(ctx.exception))
+
+    def test_invalid_status_enum_is_rejected(self) -> None:
+        data = _valid_profile_dict(status="unknown_state")
+        with self.assertRaises(ProfileValidationError):
+            validate_profile_dict(data)
+
+    def test_invalid_output_preference_enum_is_rejected(self) -> None:
+        data = _valid_profile_dict(output_preference="pdf_only")
+        with self.assertRaises(ProfileValidationError):
+            validate_profile_dict(data)
+
+    def test_completion_rate_out_of_range_is_rejected(self) -> None:
+        for bad_rate in (-0.1, 1.1, 2.0):
+            data = _valid_profile_dict(completion_rate=bad_rate)
+            with self.assertRaises(ProfileValidationError):
+                validate_profile_dict(data)
+
+    def test_timezone_naive_completed_at_is_rejected(self) -> None:
+        data = _valid_profile_dict(completed_at="2024-01-01T00:00:00")  # no tz
+        with self.assertRaises(ProfileValidationError) as ctx:
+            validate_profile_dict(data)
+        self.assertIn("completed_at", str(ctx.exception))
+
+    def test_unsupported_schema_version_is_rejected(self) -> None:
+        data = _valid_profile_dict(schema_version=99)
+        with self.assertRaises(ProfileValidationError) as ctx:
+            validate_profile_dict(data)
+        self.assertIn("schema_version", str(ctx.exception))
+
+    def test_skipped_fields_are_deduplicated(self) -> None:
+        data = _valid_profile_dict(skipped_fields=["Q01", "Q02", "Q01"])
+        model = validate_profile_dict(data)
+        self.assertEqual(model.skipped_fields.count("Q01"), 1)
+
+    def test_module_dicts_accept_dynamic_content(self) -> None:
+        data = _valid_profile_dict(
+            identity={"Q01": "Software Engineer", "Q02": "FinTech"},
+            current_skills={"Q19": "Python (advanced)", "Q20": "TypeScript"},
+        )
+        model = validate_profile_dict(data)
+        self.assertEqual(model.identity["Q01"], "Software Engineer")
+        self.assertEqual(model.current_skills["Q19"], "Python (advanced)")
+
+
+class AnswerValidationTests(unittest.TestCase):
+    """Unit tests for validate_answers and validate_pair_answers helpers."""
+
+    def test_valid_answers_return_no_errors(self) -> None:
+        answers = {"Q01": "Software Engineer", "Q02": "FinTech", "Q11": "__SKIPPED__"}
+        self.assertEqual(validate_answers(answers), [])
+
+    def test_unknown_question_id_produces_error(self) -> None:
+        errors = validate_answers({"Q99": "bad", "Q01": "good"})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Q99", errors[0])
+
+    def test_empty_string_answer_produces_error(self) -> None:
+        errors = validate_answers({"Q01": "   "})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Q01", errors[0])
+
+    def test_valid_disposition_sentinels_are_accepted(self) -> None:
+        for sentinel in ("__SKIPPED__", "__DECLINED__", "__UNKNOWN__", "__NA__", "__UNRESOLVED__"):
+            self.assertEqual(validate_answers({"Q01": sentinel}), [])
+
+    def test_pair_advance_requires_both_questions_answered(self) -> None:
+        # Only Q01 answered, Q02 missing
+        errors = validate_pair_answers(0, {"Q01": "yes"})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Q02", errors[0])
+
+    def test_pair_advance_allows_disposition_sentinels(self) -> None:
+        errors = validate_pair_answers(0, {"Q01": "__SKIPPED__", "Q02": "Some answer"})
+        self.assertEqual(errors, [])
+
+    def test_pair_advance_rejects_empty_answer_values(self) -> None:
+        errors = validate_pair_answers(0, {"Q01": "yes", "Q02": "   "})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Q02", errors[0])
+
+    def test_pair_advance_at_last_pair_index(self) -> None:
+        # Pair 24: Q49 and Q50
+        errors = validate_pair_answers(24, {"Q49": "answer", "Q50": "__DECLINED__"})
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":
