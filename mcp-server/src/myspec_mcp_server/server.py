@@ -1,9 +1,12 @@
-﻿"""MCP resources, tools, and prompts for local MySpec profile context."""
+"""MCP resources, tools, and prompts for local MySpec profile context."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
@@ -12,6 +15,10 @@ from mcp.server.mcpserver.exceptions import ToolError
 from . import __version__
 from .profile import (
     MESSAGES,
+    MigrationError,
+    MigrationResult,
+    ProfileConfigurationError,
+    ProfileSnapshot,
     ProfileValidationError,
     allocate_minutes,
     build_profile,
@@ -19,8 +26,10 @@ from .profile import (
     get_language,
     get_profile_path,
     load_profile,
+    migrate_markdown_profile,
     resource_text,
     save_profile,
+    set_cli_profile_path,
     validate_answers,
     validate_pair_answers,
 )
@@ -42,8 +51,11 @@ mcp = MCPServer(
 )
 
 
-def _load_current_profile():
-    return load_profile(get_profile_path())
+def _load_current_profile() -> ProfileSnapshot:
+    try:
+        return load_profile()
+    except ProfileConfigurationError as exc:
+        return ProfileSnapshot(Path("invalid-config.json"), "unreadable", detail=str(exc))
 
 
 @mcp.resource("myprofile://summary")
@@ -300,6 +312,85 @@ def gap_check(project_description: str) -> str:
 
 
 def main() -> None:
-    """Run only the local stdio transport expected by an MCP host."""
+    """CLI entry point for the MySpec MCP stdio server and legacy profile migration."""
+    parser = argparse.ArgumentParser(
+        prog="myspec-mcp-server",
+        description="Local-only stdio MCP server for MySpec profiles",
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Path to canonical profile.json (overrides MYSPEC_PROFILE_PATH, config, and default)",
+    )
+    parser.add_argument(
+        "--migrate",
+        action="store_true",
+        help="Migrate legacy profile.md to canonical profile.json",
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Path to legacy profile.md source for migration",
+    )
+    parser.add_argument(
+        "--dest",
+        type=str,
+        default=None,
+        help="Path to canonical profile.json destination for migration",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+    migrate_cmd = subparsers.add_parser(
+        "migrate",
+        help="Migrate a legacy profile.md to canonical profile.json",
+    )
+    migrate_cmd.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Path to legacy profile.md source",
+    )
+    migrate_cmd.add_argument(
+        "--dest",
+        type=str,
+        default=None,
+        help="Path to canonical profile.json destination",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "migrate" or args.migrate:
+        source = args.source
+        dest = args.dest or args.profile
+        try:
+            result = migrate_markdown_profile(source_path=source, dest_path=dest)
+            print(
+                f"Successfully migrated legacy Markdown profile.\n"
+                f"  Source:      {result.source}\n"
+                f"  Destination: {result.destination}\n"
+                f"  Archive:     {result.archive}\n"
+                f"  Status:      {result.status}\n"
+                f"  Completion:  {int(result.completion_rate * 100)}%"
+            )
+            sys.exit(0)
+        except MigrationError as exc:
+            print(f"Migration error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.profile:
+        try:
+            set_cli_profile_path(args.profile)
+        except ProfileConfigurationError as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     logger.info("Starting MySpec MCP server over stdio.")
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
+
+

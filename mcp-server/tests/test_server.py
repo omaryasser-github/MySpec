@@ -1,5 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -20,15 +21,28 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(dir=SERVER_ROOT)
         self.addCleanup(self.temp_dir.cleanup)
-        self.profile_path = Path(self.temp_dir.name) / "profile.md"
-        self.profile_path.write_text(
-            "# Developer Profile\n## Skills\n- Python: proficient\n- React: learning\n"
-            "## Communication Preferences\n- Concise answers\n",
-            encoding="utf-8",
-        )
+        self.profile_path = Path(self.temp_dir.name) / "profile.json"
+        profile_data = {
+            "schema_version": 1,
+            "completed_at": "2026-10-16T12:00:00+00:00",
+            "status": "partial",
+            "completion_rate": 0.5,
+            "output_preference": "english_only",
+            "language": "en",
+            "skipped_fields": [],
+            "identity": {"role": "Developer Profile"},
+            "current_skills": {"Q03": "Python", "Q04": "React"},
+            "learning_in_progress": {},
+            "limitations": {},
+            "communication_prefs": {"Q05": "Concise answers"},
+            "work_context": {"Q07": "Python and React stack"},
+            "growth_goals": {},
+        }
+        self.profile_path.write_text(json.dumps(profile_data, indent=2), encoding="utf-8")
         self.env = patch.dict(os.environ, {"MYSPEC_PROFILE_PATH": str(self.profile_path), "MYSPEC_LANG": "en"})
         self.env.start()
         self.addCleanup(self.env.stop)
+
 
     async def test_all_resources_tools_and_prompts_are_registered_and_usable(self) -> None:
         async with Client(mcp) as client:
@@ -226,5 +240,71 @@ class McpSurfaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved_data["output_preference"], "bilingual")
 
 
+    async def test_read_after_write_consistency(self) -> None:
+        """Saving a profile via finalize_interview must immediately be reflected in subsequent reads."""
+        async with Client(mcp) as client:
+            answers = {f"Q{i:02d}": f"Hardened Answer {i}" for i in range(1, 51)}
+            finalize = await client.call_tool(
+                "finalize_interview",
+                {"answers": answers, "output_preference": "english_only"},
+            )
+            self.assertFalse(finalize.is_error)
+            saved_path = Path(finalize.structured_content["path"])
+            self.assertEqual(saved_path, self.profile_path.resolve())
+
+            summary = await client.read_resource("myprofile://summary")
+            self.assertIn("Hardened Answer 1", summary.contents[0].text)
+
+            full = await client.read_resource("myprofile://full")
+            self.assertIn("Hardened Answer 50", full.contents[0].text)
+
+    async def test_legacy_markdown_triggers_migration_required_and_does_not_return_content(self) -> None:
+        """When JSON is absent but Markdown exists, reads return migration_required without markdown content."""
+        self.profile_path.unlink()
+        md_path = self.profile_path.with_suffix(".md")
+        md_path.write_text("# Secret Markdown Profile\n## Skills\n- TopSecretSkill\n", encoding="utf-8")
+        async with Client(mcp) as client:
+            summary = await client.read_resource("myprofile://summary")
+            self.assertIn("migration from legacy Markdown", summary.contents[0].text)
+            self.assertNotIn("TopSecretSkill", summary.contents[0].text)
+
+    async def test_cli_profile_arg_overrides_env_in_stdio(self) -> None:
+        """CLI --profile overrides MYSPEC_PROFILE_PATH in child process launch."""
+        cli_profile = Path(self.temp_dir.name) / "cli_override.json"
+        cli_data = {
+            "schema_version": 1,
+            "completed_at": "2026-10-16T12:00:00+00:00",
+            "status": "complete",
+            "completion_rate": 1.0,
+            "output_preference": "english_only",
+            "language": "en",
+            "skipped_fields": [],
+            "identity": {"role": "CLI Profile"},
+            "current_skills": {"Q03": "Golang"},
+            "learning_in_progress": {},
+            "limitations": {},
+            "communication_prefs": {},
+            "work_context": {},
+            "growth_goals": {},
+        }
+        cli_profile.write_text(json.dumps(cli_data, indent=2), encoding="utf-8")
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "myspec_mcp_server", "--profile", str(cli_profile)],
+            env={
+                "PYTHONPATH": str(SRC_ROOT),
+                "MYSPEC_PROFILE_PATH": str(self.profile_path),
+                "MYSPEC_LANG": "en",
+            },
+            cwd=SERVER_ROOT,
+        )
+        async with Client(params) as client:
+            result = await client.read_resource("myprofile://summary")
+            self.assertIn("CLI Profile", result.contents[0].text)
+            self.assertNotIn("Developer Profile", result.contents[0].text)
+
+
 if __name__ == "__main__":
     unittest.main()
+

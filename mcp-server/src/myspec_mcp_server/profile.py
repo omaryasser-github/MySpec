@@ -1,10 +1,11 @@
-﻿"""Read-only loading and focused extraction of the local MySpec profile."""
+"""Read-only loading, discovery precedence, migration, and persistence of the local MySpec profile."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
 MESSAGES = {
     "en": {
         "missing": "MySpec profile is missing.",
+        "migration_required": "MySpec profile requires migration from legacy Markdown. Run 'myspec-mcp-server migrate' to create canonical profile.json.",
         "unreadable": "MySpec profile could not be read.",
         "malformed": "MySpec profile is empty or malformed.",
         "summary": "MySpec profile summary",
@@ -43,6 +45,7 @@ MESSAGES = {
     },
     "ar": {
         "missing": "ملف MySpec غير موجود.",
+        "migration_required": "يتطلب ملف MySpec الترحيل من ملف Markdown القديم. شغّل 'myspec-mcp-server migrate' لإنشاء profile.json القياسي.",
         "unreadable": "تعذرت قراءة ملف MySpec.",
         "malformed": "ملف MySpec فارغ أو غير صالح.",
         "summary": "ملخص ملف MySpec",
@@ -145,6 +148,25 @@ class ProfileValidationError(ValueError):
     """Raised when profile data fails canonical model validation."""
 
 
+class ProfileConfigurationError(ValueError):
+    """Raised when profile path or config is invalid, malformed, or unsupported."""
+
+
+class MigrationError(ValueError):
+    """Raised when migration from legacy Markdown fails."""
+
+
+@dataclass(frozen=True)
+class MigrationResult:
+    """Summary of a completed Markdown-to-JSON migration."""
+
+    source: Path
+    destination: Path
+    archive: Path
+    status: str
+    completion_rate: float
+
+
 def validate_profile_dict(data: dict[str, Any]) -> MySpecProfile:
     """Parse and validate a raw dict against the canonical profile model.
 
@@ -242,19 +264,116 @@ def get_language(environ: Mapping[str, str] | None = None) -> str:
     return SUPPORTED_LANGUAGES.get(configured, DEFAULT_LANGUAGE)
 
 
-def get_profile_path(environ: Mapping[str, str] | None = None) -> Path:
-    """Resolve the configured profile path without creating or modifying it."""
+# ---------------------------------------------------------------------------
+# Path resolution precedence (Phase 14)
+# CLI (--profile) -> MYSPEC_PROFILE_PATH -> ~/.myspec/config.json -> Default
+# ---------------------------------------------------------------------------
+
+_CLI_PROFILE_PATH: Path | None = None
+
+
+def set_cli_profile_path(path: str | Path | None) -> None:
+    """Set or clear the process-wide CLI-specified profile path."""
+    global _CLI_PROFILE_PATH
+    if path is None:
+        _CLI_PROFILE_PATH = None
+    else:
+        _CLI_PROFILE_PATH = _validate_and_resolve_profile_path(path, "CLI --profile")
+
+
+def get_cli_profile_path() -> Path | None:
+    """Return the currently configured CLI profile path, if any."""
+    return _CLI_PROFILE_PATH
+
+
+def _validate_and_resolve_profile_path(raw_path: str | Path, source_name: str) -> Path:
+    """Expand, resolve, and validate a canonical profile path.
+
+    Canonical paths must resolve to a .json filename. A .md path is rejected
+    with guidance to run migration.
+    """
+    if raw_path is None:
+        raise ProfileConfigurationError(f"{source_name} cannot be None.")
+    text = str(raw_path).strip()
+    if not text:
+        raise ProfileConfigurationError(f"{source_name} cannot be empty.")
+    expanded = os.path.expandvars(os.path.expanduser(text))
+    resolved = Path(expanded).resolve()
+
+    suffix = resolved.suffix.lower()
+    if suffix != ".json":
+        if suffix == ".md":
+            raise ProfileConfigurationError(
+                f"{source_name} path '{raw_path}' specifies a legacy '.md' file. "
+                "Canonical profiles must use '.json'. Run 'myspec-mcp-server migrate' "
+                "to convert legacy Markdown profiles."
+            )
+        raise ProfileConfigurationError(
+            f"{source_name} path '{raw_path}' must have a '.json' extension, got '{suffix or 'none'}'."
+        )
+    return resolved
+
+
+def get_profile_path(
+    environ: Mapping[str, str] | None = None,
+    cli_path: str | Path | None = None,
+    config_path: Path | None = None,
+) -> Path:
+    """Resolve the canonical profile path according to documented precedence:
+    1. CLI (--profile)
+    2. Environment variable (MYSPEC_PROFILE_PATH)
+    3. MySpec config file (~/.myspec/config.json -> profile_path)
+    4. Default (~/.myspec/profile.json)
+
+    Raises:
+        ProfileConfigurationError: If an explicit source provides an invalid,
+            non-JSON, or malformed path/configuration. Higher-priority failures
+            do not fall through to lower-priority sources.
+    """
+    # 1. CLI
+    if cli_path is not None:
+        return _validate_and_resolve_profile_path(cli_path, "CLI --profile")
+    if _CLI_PROFILE_PATH is not None:
+        return _CLI_PROFILE_PATH
+
+    # 2. Environment
     env = os.environ if environ is None else environ
     override = env.get("MYSPEC_PROFILE_PATH", "").strip()
     if override:
-        expanded = os.path.expandvars(os.path.expanduser(override))
-        return Path(expanded).resolve()
+        return _validate_and_resolve_profile_path(override, "MYSPEC_PROFILE_PATH")
 
-    default_md = (Path.home() / ".myspec" / "profile.md").resolve()
-    default_json = (Path.home() / ".myspec" / "profile.json").resolve()
-    if not default_md.exists() and default_json.exists():
-        return default_json
-    return default_md
+    # 3. MySpec config file (~/.myspec/config.json)
+    cfg_file = (
+        config_path.expanduser().resolve()
+        if config_path is not None
+        else (Path.home() / ".myspec" / "config.json").resolve()
+    )
+    if cfg_file.exists():
+        if not cfg_file.is_file():
+            raise ProfileConfigurationError(f"Config path '{cfg_file}' is not a file.")
+        try:
+            cfg_text = cfg_file.read_text(encoding="utf-8")
+            cfg_data = json.loads(cfg_text)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ProfileConfigurationError(
+                f"Malformed MySpec config file at '{cfg_file}': {exc}"
+            ) from exc
+
+        if not isinstance(cfg_data, dict):
+            raise ProfileConfigurationError(
+                f"MySpec config file at '{cfg_file}' must contain a JSON object."
+            )
+
+        if "profile_path" in cfg_data:
+            val = cfg_data["profile_path"]
+            if not isinstance(val, str) or not val.strip():
+                raise ProfileConfigurationError(
+                    f"'profile_path' in '{cfg_file}' must be a non-empty string."
+                )
+            return _validate_and_resolve_profile_path(val, f"Config file ({cfg_file})")
+
+    # 4. Default
+    return (Path.home() / ".myspec" / "profile.json").resolve()
 
 
 def _extract_json_payload(text: str) -> str | None:
@@ -264,15 +383,48 @@ def _extract_json_payload(text: str) -> str | None:
 
 
 def load_profile(path: Path | None = None) -> ProfileSnapshot:
-    """Read Markdown or JSON profile text and classify failures gracefully.
+    """Read canonical JSON profile and classify failures gracefully.
 
-    JSON profiles are also checked against the supported schema versions.
-    Markdown profiles bypass canonical validation and remain available.
+    JSON profiles must validate against the canonical MySpecProfile schema.
+    Ordinary runtime reads never load Markdown files as profile context;
+    if canonical JSON is missing but a legacy Markdown profile is found,
+    the snapshot returns status 'migration_required'.
     """
-    resolved = get_profile_path() if path is None else path.expanduser().resolve()
+    if path is not None:
+        raw_p = Path(path).expanduser().resolve()
+        if raw_p.suffix.lower() == ".md":
+            return ProfileSnapshot(
+                raw_p,
+                "migration_required",
+                detail="Markdown profiles must be migrated to JSON using 'myspec-mcp-server migrate'.",
+                format="markdown",
+            )
+        try:
+            resolved = _validate_and_resolve_profile_path(path, "load_profile path")
+        except ProfileConfigurationError as exc:
+            return ProfileSnapshot(raw_p, "unreadable", detail=str(exc))
+    else:
+        try:
+            resolved = get_profile_path()
+        except ProfileConfigurationError as exc:
+            return ProfileSnapshot(Path("invalid-config.json"), "unreadable", detail=str(exc))
+
     try:
         if not resolved.exists():
-            return ProfileSnapshot(resolved, "missing", detail="file does not exist")
+            legacy_sibling = resolved.with_suffix(".md")
+            default_legacy_md = (Path.home() / ".myspec" / "profile.md").resolve()
+            if legacy_sibling.exists() or (
+                resolved == (Path.home() / ".myspec" / "profile.json").resolve()
+                and default_legacy_md.exists()
+            ):
+                return ProfileSnapshot(
+                    resolved,
+                    "migration_required",
+                    detail="Legacy Markdown profile found. Run migration ('myspec-mcp-server migrate') to create canonical profile.json.",
+                    format="markdown",
+                )
+            return ProfileSnapshot(resolved, "missing", detail="canonical profile.json does not exist")
+
         if not resolved.is_file():
             return ProfileSnapshot(resolved, "unreadable", detail="configured path is not a file")
         if resolved.stat().st_size > MAX_PROFILE_BYTES:
@@ -285,35 +437,42 @@ def load_profile(path: Path | None = None) -> ProfileSnapshot:
     if not stripped:
         return ProfileSnapshot(resolved, "malformed", raw_text, detail="file is empty")
 
-    json_payload = stripped if stripped.startswith("{") else _extract_json_payload(stripped)
-    if resolved.suffix.lower() == ".json" and json_payload is None:
-        json_payload = stripped
-    if json_payload is not None:
-        try:
-            parsed = json.loads(json_payload)
-        except json.JSONDecodeError as exc:
-            return ProfileSnapshot(
-                resolved, "malformed", raw_text, format="json",
-                detail=f"invalid JSON at line {exc.lineno}"
-            )
-        if not isinstance(parsed, dict):
-            return ProfileSnapshot(
-                resolved, "malformed", raw_text, format="json",
-                detail="JSON profile root must be an object"
-            )
-        # Version check: reject unsupported schema versions.
-        version = parsed.get("schema_version")
-        if version is not None and version not in SUPPORTED_SCHEMA_VERSIONS:
-            return ProfileSnapshot(
-                resolved, "malformed", raw_text, format="json",
-                detail=(
-                    f"unsupported schema_version {version!r}; "
-                    f"supported: {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
-                ),
-            )
-        return ProfileSnapshot(resolved, "available", raw_text, parsed, "json")
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        return ProfileSnapshot(
+            resolved, "malformed", raw_text, format="json",
+            detail=f"invalid JSON at line {exc.lineno}",
+        )
 
-    return ProfileSnapshot(resolved, "available", raw_text, None, "markdown")
+    if not isinstance(parsed, dict):
+        return ProfileSnapshot(
+            resolved, "malformed", raw_text, format="json",
+            detail="JSON profile root must be an object",
+        )
+
+    # Version check: reject unsupported schema versions.
+    version = parsed.get("schema_version")
+    if version is not None and version not in SUPPORTED_SCHEMA_VERSIONS:
+        return ProfileSnapshot(
+            resolved, "malformed", raw_text, format="json",
+            detail=(
+                f"unsupported schema_version {version!r}; "
+                f"supported: {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+            ),
+        )
+
+    # Validate against canonical Pydantic model
+    try:
+        validate_profile_dict(parsed)
+    except ProfileValidationError as exc:
+        return ProfileSnapshot(
+            resolved, "malformed", raw_text, format="json",
+            detail=f"Schema validation failed: {exc}",
+        )
+
+    return ProfileSnapshot(resolved, "available", raw_text, parsed, "json")
+
 
 
 # ---------------------------------------------------------------------------
@@ -643,14 +802,16 @@ def build_profile(
 
 
 # ---------------------------------------------------------------------------
-# Persistence
+# Atomic Persistence (Phase 14)
 # ---------------------------------------------------------------------------
 
 def save_profile(profile_data: dict[str, Any], target_path: Path | None = None) -> Path:
-    """Atomically save profile data to disk in JSON format.
+    """Atomically save profile data to disk in canonical JSON format.
 
     Validates the supplied data against the canonical MySpecProfile model
     before writing. The destination file is never touched on a validation failure.
+    Uses a temporary file in the same directory with flush and fsync, then
+    atomically replaces the destination.
 
     Args:
         profile_data: The profile dictionary to persist.
@@ -661,23 +822,216 @@ def save_profile(profile_data: dict[str, Any], target_path: Path | None = None) 
 
     Raises:
         ProfileValidationError: If profile_data fails canonical validation.
+        ProfileConfigurationError: If target_path is not a valid JSON path.
+        OSError: If filesystem operations fail.
     """
     validate_profile_dict(profile_data)
 
     if target_path is not None:
-        destination_path = target_path.expanduser().resolve()
+        destination_path = _validate_and_resolve_profile_path(target_path, "target_path")
     else:
-        current_path = get_profile_path()
-        if current_path.suffix.lower() == ".md":
-            destination_path = current_path.with_name("profile.json").resolve()
-        else:
-            destination_path = current_path.resolve()
+        destination_path = get_profile_path()
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = destination_path.with_suffix(".json.tmp")
-    temp_path.write_text(
-        json.dumps(profile_data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    temp_path.replace(destination_path)
+    temp_path = destination_path.with_name(f".{destination_path.name}.{os.getpid()}.tmp")
+
+    payload = json.dumps(profile_data, indent=2, ensure_ascii=False)
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, destination_path)
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
     return destination_path
+
+
+# ---------------------------------------------------------------------------
+# Legacy Markdown Migration (Phase 14)
+# ---------------------------------------------------------------------------
+
+def _parse_legacy_markdown_to_profile(raw_text: str) -> dict[str, Any]:
+    """Deterministically map legacy Markdown sections to canonical profile modules."""
+    sections = _markdown_sections(raw_text)
+    if not sections:
+        raise MigrationError("Legacy Markdown contains no headings or structured sections.")
+
+    modules: dict[str, dict[str, Any]] = {mod: {} for mod in CONTEXT_MODULES}
+
+    title_to_module = [
+        (("identity", "role", "who am i", "about", "هوية", "تعريف"), "identity"),
+        (("current skill", "skill", "technolog", "tech stack", "stack", "tool", "مهار", "تقني"), "current_skills"),
+        (("learning in progress", "learning", "study", "قيد التعلم", "تعلم"), "learning_in_progress"),
+        (("limitation", "constraint", "weakness", "not familiar", "قيود", "حدود"), "limitations"),
+        (("communication", "preference", "style", "feedback", "تواصل", "تفضيل"), "communication_prefs"),
+        (("work context", "context", "environment", "domain", "سياق العمل", "بيئة العمل"), "work_context"),
+        (("growth goal", "goal", "aspiration", "future", "أهداف", "نمو"), "growth_goals"),
+    ]
+
+    for title, body in sections:
+        norm_title = title.lower()
+        target_mod: str | None = None
+        for keywords, mod_name in title_to_module:
+            if any(k in norm_title for k in keywords):
+                target_mod = mod_name
+                break
+
+        if target_mod is None:
+            # Skip unrecognized high-level wrapper titles like "Developer Profile"
+            continue
+
+        for line in body.splitlines():
+            line_str = line.strip()
+            if not line_str or line_str.startswith("#"):
+                continue
+            if line_str.startswith(("-", "*")):
+                line_str = line_str.lstrip("-*").strip()
+
+            if ":" in line_str:
+                k, v = line_str.split(":", 1)
+                k = k.strip()
+                v = v.strip()
+                if k and v:
+                    modules[target_mod][k] = v
+            elif line_str:
+                modules[target_mod][line_str] = "mentioned"
+
+    has_content = any(len(v) > 0 for v in modules.values())
+    if not has_content:
+        raise MigrationError("No structured profile fields could be extracted from legacy Markdown.")
+
+    active_modules = sum(1 for m in CONTEXT_MODULES if len(modules[m]) > 0)
+    completion_rate = round(min(active_modules / 7.0, 1.0), 2)
+
+    return {
+        "schema_version": 1,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "status": "complete" if completion_rate >= 1.0 else "partial",
+        "completion_rate": completion_rate,
+        "output_preference": "english_only",
+        "language": "ar" if any("\u0600" <= c <= "\u06ff" for c in raw_text) else "en",
+        "skipped_fields": [],
+        "identity": modules["identity"],
+        "current_skills": modules["current_skills"],
+        "learning_in_progress": modules["learning_in_progress"],
+        "limitations": modules["limitations"],
+        "communication_prefs": modules["communication_prefs"],
+        "work_context": modules["work_context"],
+        "growth_goals": modules["growth_goals"],
+    }
+
+
+def migrate_markdown_profile(
+    source_path: Path | str | None = None,
+    dest_path: Path | str | None = None,
+) -> MigrationResult:
+    """Perform a one-time migration of a legacy Markdown profile to canonical JSON.
+
+    1. Selects destination via precedence (dest_path -> CLI -> MYSPEC_PROFILE_PATH -> config -> default).
+    2. Refuses to overwrite an existing canonical JSON profile.
+    3. Selects source (explicit source_path or default legacy location).
+    4. Deterministically parses legacy Markdown.
+    5. Validates converted data against canonical MySpecProfile.
+    6. Creates a recoverable archive backup (.bak) of the source Markdown.
+    7. Atomically saves the validated JSON.
+
+    Returns:
+        MigrationResult summary.
+
+    Raises:
+        MigrationError: If source is missing/empty, destination exists, or validation fails.
+    """
+    # 1. Destination
+    if dest_path is not None:
+        destination = _validate_and_resolve_profile_path(dest_path, "Migration destination")
+    else:
+        destination = get_profile_path()
+
+    # 2. Refuse overwrite
+    if destination.exists():
+        raise MigrationError(
+            f"Destination canonical profile already exists at '{destination}'. "
+            "Migration will not overwrite existing canonical JSON."
+        )
+
+    # 3. Source selection
+    if source_path is not None:
+        expanded_src = os.path.expandvars(os.path.expanduser(str(source_path)))
+        source = Path(expanded_src).resolve()
+    else:
+        sibling_md = destination.with_suffix(".md")
+        default_md = (Path.home() / ".myspec" / "profile.md").resolve()
+        if sibling_md.exists():
+            source = sibling_md
+        elif default_md.exists():
+            source = default_md
+        else:
+            raise MigrationError(
+                f"No legacy Markdown profile found. Checked '{sibling_md}' and '{default_md}'."
+            )
+
+    if not source.exists():
+        raise MigrationError(f"Legacy Markdown source does not exist: '{source}'.")
+    if not source.is_file():
+        raise MigrationError(f"Legacy Markdown source is not a file: '{source}'.")
+
+    # 4. Read source
+    try:
+        raw_text = source.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise MigrationError(f"Could not read legacy Markdown source at '{source}': {exc}") from exc
+
+    if not raw_text:
+        raise MigrationError(f"Legacy Markdown profile at '{source}' is empty.")
+
+    # 5. Parse
+    json_payload = _extract_json_payload(raw_text)
+    if json_payload is not None:
+        try:
+            converted = json.loads(json_payload)
+        except json.JSONDecodeError as exc:
+            raise MigrationError(
+                f"Fenced JSON in legacy Markdown at '{source}' is malformed: {exc}"
+            ) from exc
+    else:
+        converted = _parse_legacy_markdown_to_profile(raw_text)
+
+    # 6. Validate
+    try:
+        validated = validate_profile_dict(converted)
+    except ProfileValidationError as exc:
+        raise MigrationError(
+            f"Converted profile from '{source}' failed schema validation:\n{exc}"
+        ) from exc
+
+    # 7. Create archive copy
+    archive_path = source.with_name(f"{source.name}.bak")
+    if archive_path.exists():
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        archive_path = source.with_name(f"{source.name}.{ts}.bak")
+
+    try:
+        shutil.copy2(source, archive_path)
+    except OSError as exc:
+        raise MigrationError(f"Failed to create archive backup of '{source}': {exc}") from exc
+
+    # 8. Atomically save canonical JSON
+    try:
+        save_profile(validated.to_dict(), destination)
+    except Exception as exc:
+        raise MigrationError(f"Failed to persist canonical JSON to '{destination}': {exc}") from exc
+
+    return MigrationResult(
+        source=source,
+        destination=destination,
+        archive=archive_path,
+        status="migrated",
+        completion_rate=validated.completion_rate,
+    )
+
