@@ -159,11 +159,11 @@ No future item above is required to complete Phase 12.
 
 ## 8. Definition of Done
 
-* [ ] Markdown remains the sole authored source for English and Arabic questions.
-* [ ] Every selected bank is fully parsed and validated before any caller receives or caches it.
-* [ ] Missing, malformed, duplicate, unexpected, and incomplete question sets produce actionable errors.
-* [ ] The process cache is keyed by resolved bank root and normalized language and stores only validated banks.
-* [ ] Changing the configured root cannot return entries from a previous root; invalid loads cannot poison the cache.
-* [ ] Existing question ordering, language behavior, and interview pair boundaries remain intact.
-* [ ] Failure-path tests and documentation updates are complete.
-* [ ] No unrelated application features or infrastructure are introduced.
+* [x] Markdown remains the sole authored source for English and Arabic questions.
+* [x] Every selected bank is fully parsed and validated before any caller receives or caches it.
+* [x] Missing, malformed, duplicate, unexpected, and incomplete question sets produce actionable errors.
+* [x] The process cache is keyed by resolved bank root and normalized language and stores only validated banks.
+* [x] Changing the configured root cannot return entries from a previous root; invalid loads cannot poison the cache.
+* [x] Existing question ordering, language behavior, and interview pair boundaries remain intact.
+* [x] Failure-path tests and documentation updates are complete.
+* [x] No unrelated application features or infrastructure are introduced.

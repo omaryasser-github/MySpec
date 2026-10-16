@@ -56,6 +56,9 @@ The host starts and stops the server process. To check package startup manually,
 
 ### Tools
 
+- `start_interview(language="en")` — starts an interactive MySpec interview session, returning Question Pair 0.
+- `advance_interview(pair_index, answers_so_far, language="en")` — submits answers and returns the next pair or signals completion.
+- `finalize_interview(answers, language="en")` — builds and persists the profile from accumulated interview answers.
 - `get_gap_analysis(project_description)` — returns local skill evidence and explicit technology-term overlap to support host-side gap reasoning. A text match is not a proficiency claim.
 - `get_onboarding_plan(topic, minutes=60)` — returns a time-boxed learning agenda informed by the local skill view.
 
@@ -71,9 +74,10 @@ The server reads the profile afresh on each call. Missing, unreadable, empty, or
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MYSPEC_PROFILE_PATH` | `~/.myspec/profile.md` (or `profile.json`) | Override the local profile path. |
+| `MYSPEC_QUESTIONS_PATH` | `<package_root>/../../../questions` | Override canonical question bank directory. |
 | `MYSPEC_LANG` | `en` | Select English or Modern Standard Arabic response labels. |
 
-The profile path is read-only. The local OS process and filesystem permissions are the trust boundary.
+The local OS process and filesystem permissions are the trust boundary.
 
 ## Tests
 

@@ -73,17 +73,19 @@ The parser reads each category markdown file and extracts question blocks matchi
 If question lines wrap across multiple lines, concatenate them cleanly into a single prompt string.
 
 ### 3.5 Core Engine API Functions
-The module exposes the following clean public interfaces:
+The module exposes the following clean public interfaces (further hardened in [Phase 12](phase-12-question-bank-loading-and-cache-reliability.md)):
 
 1. `load_category_questions(category_id: int, lang: str = "en") -> list[Question]`  
-   Loads and parses questions for a specific category.
+   Loads and parses questions for a specific category, validated against full bank integrity.
 2. `load_all_questions(lang: str = "en") -> dict[str, Question]`  
-   Loads all 50 questions keyed by ID (`"Q01"` to `"Q50"`). Caches results in memory for the process lifetime.
+   Loads all 50 questions keyed by ID (`"Q01"` to `"Q50"`). Caches results in memory keyed by `(resolved_questions_root, normalized_language)` for process lifetime.
 3. `get_question_pair(pair_index: int, lang: str = "en") -> list[Question]`  
    Returns the 2 questions for turn `pair_index` (where `pair_index` is `0` to `24`).  
    - Index `0` returns `[Q01, Q02]`.  
    - Index `24` returns `[Q49, Q50]`.  
-   - Raises `IndexError` or returns empty list for indices $\ge 25$.
+   - Raises `IndexError` for out-of-range indices.
+4. `validate_bank_parity(root: Path | None = None) -> bool`  
+   Validates ID completeness and parity across English and Arabic banks.
 
 ---
 

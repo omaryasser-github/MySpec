@@ -7,7 +7,10 @@ name = "myspec-local-mcp-server"
 version = "0.1.0"
 description = "Local-only stdio MCP server for MySpec profiles"
 requires-python = ">=3.10"
-dependencies = ["mcp==2.2.0"]
+dependencies = [
+    "mcp==2.2.0",
+    "pydantic>=2.0",
+]
 
 [project.scripts]
 myspec-mcp-server = "myspec_mcp_server.server:main"
